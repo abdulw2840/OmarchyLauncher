@@ -66,7 +66,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import com.omarchylauncher.app.ui.components.karuiAppHoldOrDrag
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
@@ -106,6 +108,7 @@ fun AppDrawerScreen(
     onClose: () -> Unit,
     onLaunchApp: (AppEntry) -> Unit,
     onLongPressApp: (AppEntry) -> Unit,
+    onDismissLongPressApp: () -> Unit,
     onToggleListMode: (Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onLockScreen: () -> Unit,
@@ -534,46 +537,32 @@ fun AppDrawerScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(pageApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
-                            var itemRootPos by remember { mutableStateOf(Offset.Zero) }
-                            var dragStarted by remember { mutableStateOf(false) }
-                            var totalDist by remember { mutableStateOf(0f) }
+                            var itemCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
                             Box(
                                 modifier = Modifier
                                     .onGloballyPositioned { coords ->
-                                        itemRootPos = coords.positionInRoot()
+                                        itemCoords = coords
                                     }
-                                    .pointerInput(app.packageName) {
-                                        detectDragGesturesAfterLongPress(
-                                            onDragStart = { offset ->
-                                                dragStarted = false
-                                                totalDist = 0f
-                                                if (settings.hapticFeedback) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            },
-                                            onDrag = { change, dragAmount ->
-                                                change.consume()
-                                                totalDist += dragAmount.getDistance()
-                                                if (!dragStarted && totalDist > 26f) {
-                                                    dragStarted = true
-                                                    onDragToHomeStart(app, itemRootPos + change.position)
-                                                } else if (dragStarted) {
-                                                    onDragToHomeMove(dragAmount)
-                                                }
-                                            },
-                                            onDragEnd = {
-                                                if (!dragStarted && totalDist < 20f) {
-                                                    onLongPressApp(app)
-                                                } else if (dragStarted) {
-                                                    onDragToHomeEnd(true)
-                                                }
-                                                dragStarted = false
-                                            },
-                                            onDragCancel = {
-                                                if (dragStarted) onDragToHomeEnd(false)
-                                                dragStarted = false
-                                            }
-                                        )
-                                    }
+                                    .karuiAppHoldOrDrag(
+                                        key = app.packageName,
+                                        getCoords = { itemCoords },
+                                        haptic = if (settings.hapticFeedback) haptic else null,
+                                        onShowMenu = { onLongPressApp(app) },
+                                        onDismissMenu = onDismissLongPressApp,
+                                        onDragStart = { rootPos ->
+                                            onDragToHomeStart(app, rootPos)
+                                        },
+                                        onDrag = { _, deltaRoot ->
+                                            onDragToHomeMove(deltaRoot)
+                                        },
+                                        onDragEnd = {
+                                            onDragToHomeEnd(true)
+                                        },
+                                        onDragCancel = {
+                                            onDragToHomeEnd(false)
+                                        }
+                                    )
                             ) {
                                 KaruiAppTile(
                                     app = app,

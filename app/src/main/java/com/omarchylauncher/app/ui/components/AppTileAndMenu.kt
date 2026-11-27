@@ -1,11 +1,15 @@
 package com.omarchylauncher.app.ui.components
 
 import android.content.pm.ShortcutInfo
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +21,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -24,15 +29,22 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -41,7 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.zIndex
 import com.omarchylauncher.app.data.AppEntry
 import com.omarchylauncher.app.data.IconShape
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
@@ -52,6 +64,82 @@ fun iconShapeToComposeShape(iconShape: IconShape): Shape = when (iconShape) {
     IconShape.CIRCLE -> CircleShape
     IconShape.IOS -> RoundedCornerShape(percent = 24)
     IconShape.ONEUI -> RoundedCornerShape(percent = 36)
+}
+
+fun Modifier.karuiAppHoldOrDrag(
+    key: Any?,
+    getCoords: () -> LayoutCoordinates?,
+    haptic: HapticFeedback?,
+    onShowMenu: () -> Unit,
+    onDismissMenu: () -> Unit,
+    onDragStart: (rootPos: Offset) -> Unit,
+    onDrag: (rootPos: Offset, deltaRoot: Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDragCancel: () -> Unit
+): Modifier = this.pointerInput(key) {
+    val touchSlop = viewConfiguration.touchSlop
+    awaitEachGesture {
+        val down = awaitFirstDown(requireUnconsumed = false)
+        val downPos = down.position
+        var movedBeforeLongPress = false
+        var releasedBeforeLongPress = false
+
+        val timedOut = withTimeoutOrNull(360L) {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Main)
+                val ch = event.changes.firstOrNull { it.id == down.id }
+                if (ch == null || !ch.pressed) {
+                    releasedBeforeLongPress = true
+                    break
+                }
+                if ((ch.position - downPos).getDistance() > touchSlop) {
+                    movedBeforeLongPress = true
+                    break
+                }
+            }
+        }
+
+        if (releasedBeforeLongPress || movedBeforeLongPress || timedOut != null) {
+            return@awaitEachGesture
+        }
+
+        // Long press triggered while finger is still down!
+        haptic?.performHapticFeedback(HapticFeedbackType.LongPress)
+        onShowMenu()
+
+        var dragStarted = false
+        var prevRoot = getCoords()?.localToRoot(downPos) ?: downPos
+        var anchorLocal = downPos
+
+        try {
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Main)
+                val ch = event.changes.firstOrNull { it.id == down.id }
+                if (ch == null || !ch.pressed) {
+                    if (dragStarted) onDragEnd()
+                    break
+                }
+                val currentCoords = getCoords()
+                val currentRoot = currentCoords?.localToRoot(ch.position) ?: prevRoot
+                if (!dragStarted) {
+                    if ((ch.position - anchorLocal).getDistance() > 18f) {
+                        dragStarted = true
+                        onDismissMenu()
+                        prevRoot = currentRoot
+                        onDragStart(currentRoot)
+                        ch.consume()
+                    }
+                } else {
+                    ch.consume()
+                    val deltaRoot = currentRoot - prevRoot
+                    prevRoot = currentRoot
+                    onDrag(currentRoot, deltaRoot)
+                }
+            }
+        } catch (_: Throwable) {
+            if (dragStarted) onDragCancel()
+        }
+    }
 }
 
 @Composable
@@ -165,13 +253,32 @@ fun KaruiAppContextDialog(
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
 
-    Dialog(onDismissRequest = onDismiss) {
+    BackHandler(onBack = onDismiss)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .zIndex(100f)
+            .background(Color.Black.copy(alpha = 0.55f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss
+            )
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center
+    ) {
         Column(
             modifier = Modifier
+                .widthIn(max = 360.dp)
                 .fillMaxWidth()
                 .clip(karuiShape())
                 .background(palette.surface)
                 .border(2.dp, palette.border, karuiShape())
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {}
+                )
                 .padding(14.dp)
         ) {
             Text(

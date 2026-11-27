@@ -181,13 +181,14 @@ class MainActivity : ComponentActivity() {
             val privilegeStatus by viewModel.privilegeStatus.collectAsStateWithLifecycle()
             val clockState by viewModel.clockState.collectAsStateWithLifecycle()
             val isWeatherRefreshing by viewModel.isWeatherRefreshing.collectAsStateWithLifecycle()
-            val pinnedHomeApps by viewModel.pinnedHomeApps.collectAsStateWithLifecycle()
+            val pinnedHomeSlots by viewModel.pinnedHomeSlots.collectAsStateWithLifecycle()
             val dockApps by viewModel.dockApps.collectAsStateWithLifecycle()
 
             var drawerOpen by remember { mutableStateOf(false) }
             var focusDrawerSearch by remember { mutableStateOf(false) }
             var contextApp by remember { mutableStateOf<AppEntry?>(null) }
             var editingApp by remember { mutableStateOf<AppEntry?>(null) }
+            var confirmUninstallSystemApp by remember { mutableStateOf<Pair<AppEntry, Boolean>?>(null) }
             var pendingHidePkgForPin by remember { mutableStateOf<String?>(null) }
             var showWidgetPicker by remember { mutableStateOf(false) }
             var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
@@ -227,12 +228,14 @@ class MainActivity : ComponentActivity() {
                         settings = settings,
                         clockState = clockState,
                         isWeatherRefreshing = isWeatherRefreshing,
-                        pinnedApps = pinnedHomeApps,
+                        pinnedSlots = pinnedHomeSlots,
                         dockApps = dockApps,
                         appWidgetHost = appWidgetHost,
                         appWidgetManager = appWidgetManager,
                         homeResetSignal = homeResetSignal,
                         externalDragActive = draggingDrawerApp != null,
+                        externalDragPos = draggingDrawerPos,
+                        externalDragIsSystem = draggingDrawerApp?.isSystem == true,
                         onDockTopReported = { dockTopY = it },
                         contentPadding = insets,
                         onOpenDrawer = { focusSearch ->
@@ -251,7 +254,7 @@ class MainActivity : ComponentActivity() {
                         onReorderWidgets = viewModel::setWidgetOrder,
                         onAddPage = { viewModel.setExtraPagesCount(settings.extraPagesCount + 1) },
                         onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
-                        onSavePinnedOrder = viewModel::setPinnedHomePackages,
+                        onSavePinnedSlots = viewModel::setPinnedHomeSlots,
                         onSaveDockOrder = viewModel::setDockPackages,
                         onMoveHomeToDock = viewModel::moveHomeToDock,
                         onRemoveHomeApp = viewModel::removePinnedHome,
@@ -262,11 +265,13 @@ class MainActivity : ComponentActivity() {
                         onRefreshWeather = { viewModel.refreshWeather(silent = false) },
                         onSetWeatherCity = viewModel::setWeatherLocation,
                         onLaunchApp = viewModel::launchApp,
-                        onLongPressApp = { contextApp = it }
+                        onLongPressApp = { contextApp = it },
+                        onDismissLongPressApp = { contextApp = null }
                     )
 
                     val density = LocalDensity.current
-                    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+                    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+                    val topDropLimitPx = with(density) { (insets.calculateTopPadding() + 86.dp).toPx() }
 
                     AnimatedVisibility(
                         visible = drawerOpen,
@@ -288,6 +293,7 @@ class MainActivity : ComponentActivity() {
                                 viewModel.launchApp(it)
                             },
                             onLongPressApp = { contextApp = it },
+                            onDismissLongPressApp = { contextApp = null },
                             onToggleListMode = viewModel::setDrawerListMode,
                             onOpenSettings = viewModel::openSettings,
                             onLockScreen = viewModel::lockScreen,
@@ -310,13 +316,24 @@ class MainActivity : ComponentActivity() {
                             onDragToHomeEnd = { commit ->
                                 val dropped = draggingDrawerApp
                                 val dropY = draggingDrawerPos.y
+                                val dropX = draggingDrawerPos.x
                                 draggingDrawerApp = null
                                 if (commit && dropped != null) {
                                     drawerOpen = false
-                                    if (settings.showDock && dropY >= dockTopY - 32f) {
-                                        viewModel.addDockPackage(dropped.packageName)
-                                    } else {
-                                        viewModel.addPinnedHomeAt(dropped.packageName)
+                                    when {
+                                        dropY < topDropLimitPx -> {
+                                            if (!dropped.isSystem && dropX >= screenWidthPx / 2f) {
+                                                viewModel.uninstallApp(dropped.packageName, useRoot = false)
+                                            } else {
+                                                viewModel.removePinnedHome(dropped.packageName)
+                                            }
+                                        }
+                                        settings.showDock && dropY >= dockTopY - 32f -> {
+                                            viewModel.addDockPackage(dropped.packageName)
+                                        }
+                                        else -> {
+                                            viewModel.addPinnedHomeAt(dropped.packageName)
+                                        }
                                     }
                                 }
                             }
@@ -324,8 +341,9 @@ class MainActivity : ComponentActivity() {
                     }
 
                     draggingDrawerApp?.let { dragged ->
-                        val offsetX = with(density) { (draggingDrawerPos.x - 36.dp.toPx()).toDp() }
-                        val offsetY = with(density) { (draggingDrawerPos.y - 36.dp.toPx()).toDp() }
+                        val halfIconPx = with(density) { (settings.iconSizeDp.dp.toPx() / 2f) }
+                        val offsetX = with(density) { (draggingDrawerPos.x - halfIconPx).toDp() }
+                        val offsetY = with(density) { (draggingDrawerPos.y - halfIconPx).toDp() }
                         Box(
                             modifier = Modifier
                                 .offset(x = offsetX, y = offsetY)
@@ -373,8 +391,68 @@ class MainActivity : ComponentActivity() {
                             onEditIconLabel = { editingApp = target },
                             onForceStop = { viewModel.forceStopApp(target.packageName) },
                             onFreeze = { viewModel.freezeApp(target.packageName, true) },
-                            onUninstall = { useRoot -> viewModel.uninstallApp(target.packageName, useRoot) }
+                            onUninstall = { useRoot ->
+                                if (target.isSystem) {
+                                    confirmUninstallSystemApp = target to useRoot
+                                } else {
+                                    viewModel.uninstallApp(target.packageName, useRoot)
+                                }
+                            }
                         )
+                    }
+
+                    confirmUninstallSystemApp?.let { (sysApp, useRoot) ->
+                        Dialog(onDismissRequest = { confirmUninstallSystemApp = null }) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(palette.surface)
+                                    .border(2.dp, Color(0xFFEF5350), karuiShape())
+                                    .padding(14.dp)
+                            ) {
+                                Text(
+                                    text = "SYSTEM APP WARNING",
+                                    color = Color(0xFFEF5350),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = "${sysApp.label} (${sysApp.packageName}) is a system app. Uninstalling it may break system features or cause instability. Continue?",
+                                    color = palette.text,
+                                    fontSize = 12.sp
+                                )
+                                Spacer(Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    KaruiButton(
+                                        text = "CANCEL",
+                                        onClick = { confirmUninstallSystemApp = null },
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(karuiShape())
+                                            .background(Color(0xFFEF5350))
+                                            .clickable {
+                                                confirmUninstallSystemApp = null
+                                                viewModel.uninstallApp(sysApp.packageName, useRoot)
+                                            }
+                                            .padding(vertical = 10.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "UNINSTALL",
+                                            color = Color.White,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     // Edit Icon & Label + Icon Pack Picker Dialog

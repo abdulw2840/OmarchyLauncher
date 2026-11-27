@@ -72,12 +72,14 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -96,6 +98,7 @@ import com.omarchylauncher.app.ui.components.KaruiButton
 import com.omarchylauncher.app.ui.components.KaruiChip
 import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
+import com.omarchylauncher.app.ui.components.karuiAppHoldOrDrag
 import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
@@ -112,12 +115,14 @@ fun HomeWorkspaceScreen(
     settings: LauncherSettings,
     clockState: ClockState,
     isWeatherRefreshing: Boolean,
-    pinnedApps: List<AppEntry>,
+    pinnedSlots: List<AppEntry?>,
     dockApps: List<AppEntry>,
     appWidgetHost: AppWidgetHost,
     appWidgetManager: AppWidgetManager,
     homeResetSignal: Int,
     externalDragActive: Boolean = false,
+    externalDragPos: Offset = Offset.Zero,
+    externalDragIsSystem: Boolean = false,
     onDockTopReported: (Float) -> Unit = {},
     contentPadding: PaddingValues,
     onOpenDrawer: (focusSearch: Boolean) -> Unit,
@@ -130,7 +135,7 @@ fun HomeWorkspaceScreen(
     onReorderWidgets: (List<Int>) -> Unit,
     onAddPage: () -> Unit,
     onRemovePage: () -> Unit,
-    onSavePinnedOrder: (List<String>) -> Unit,
+    onSavePinnedSlots: (List<String?>) -> Unit,
     onSaveDockOrder: (List<String>) -> Unit,
     onMoveHomeToDock: (String) -> Unit,
     onRemoveHomeApp: (String) -> Unit,
@@ -141,15 +146,19 @@ fun HomeWorkspaceScreen(
     onRefreshWeather: () -> Unit,
     onSetWeatherCity: (String) -> Unit,
     onLaunchApp: (AppEntry) -> Unit,
-    onLongPressApp: (AppEntry) -> Unit
+    onLongPressApp: (AppEntry) -> Unit,
+    onDismissLongPressApp: () -> Unit
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     val topDropLimitPx = with(density) { (contentPadding.calculateTopPadding() + 86.dp).toPx() }
+    var homeOverlayOrigin by remember { mutableStateOf(Offset.Zero) }
+    var gridCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var dockTopY by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var activeDragRootPos by remember { mutableStateOf(Offset.Zero) }
     var activeDragIsSystem by remember { mutableStateOf(false) }
@@ -161,16 +170,17 @@ fun HomeWorkspaceScreen(
     val gridState = rememberLazyGridState()
 
     var draggingPkg by remember { mutableStateOf<String?>(null) }
-    var dragOffset by remember { mutableStateOf(Offset.Zero) }
-    var totalDragDist by remember { mutableFloatStateOf(0f) }
     var swapCount by remember { mutableIntStateOf(0) }
     var lastSwapTime by remember { mutableLongStateOf(0L) }
 
-    val localPinned = remember { mutableStateListOf<AppEntry>() }
-    LaunchedEffect(pinnedApps, draggingPkg) {
+    val totalGridSlots = (settings.gridRows * settings.gridColumns).coerceAtLeast(pinnedSlots.size)
+    val localSlots = remember { mutableStateListOf<AppEntry?>() }
+    LaunchedEffect(pinnedSlots, draggingPkg, totalGridSlots) {
         if (draggingPkg == null) {
-            localPinned.clear()
-            localPinned.addAll(pinnedApps)
+            localSlots.clear()
+            for (i in 0 until totalGridSlots) {
+                localSlots.add(pinnedSlots.getOrNull(i))
+            }
         }
     }
 
@@ -263,6 +273,9 @@ fun HomeWorkspaceScreen(
                 start = 16.dp,
                 end = 16.dp
             )
+            .onGloballyPositioned { coords ->
+                homeOverlayOrigin = coords.positionInRoot()
+            }
     ) {
         Column(
             modifier = Modifier
@@ -282,14 +295,8 @@ fun HomeWorkspaceScreen(
                 if (page == 0) {
                     // Default Home Screen
                     Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    scaleX = workspaceScale
-                    scaleY = workspaceScale
-                    translationY = workspaceOffsetYPx
-                }
-        ) {
+                        modifier = Modifier.fillMaxSize()
+                    ) {
                         if (settings.showAtAGlance) {
                             KaruiBox(title = "omarchy // status", contentPadding = 12.dp) {
                                 Text(
@@ -391,114 +398,106 @@ fun HomeWorkspaceScreen(
                         }
 
                         Box(modifier = Modifier.weight(1f)) {
-                            if (localPinned.isNotEmpty()) {
-                                LazyVerticalGrid(
-                                    state = gridState,
-                                    columns = GridCells.Fixed(settings.gridColumns),
-                                    modifier = Modifier.fillMaxSize(),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    itemsIndexed(localPinned, key = { _, app -> "${app.packageName}/${app.activityName}" }) { index, app ->
+                            LazyVerticalGrid(
+                                state = gridState,
+                                columns = GridCells.Fixed(settings.gridColumns),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .onGloballyPositioned { coords -> gridCoords = coords },
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                itemsIndexed(
+                                    localSlots,
+                                    key = { idx, app -> if (app != null) "${app.packageName}/${app.activityName}" else "empty_$idx" }
+                                ) { index, app ->
+                                    if (app == null) {
+                                        Spacer(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height((settings.iconSizeDp + if (settings.showHomeLabels) 26 else 10).dp)
+                                        )
+                                    } else {
                                         val isDragging = draggingPkg == app.packageName
-                                        var itemRootPos by remember { mutableStateOf(Offset.Zero) }
+                                        var itemCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
                                         Box(
                                             modifier = Modifier
                                                 .then(if (!isDragging) Modifier.animateItem() else Modifier)
-                                                .onGloballyPositioned { coords ->
-                                                    itemRootPos = coords.positionInRoot()
-                                                }
-                                                .graphicsLayer {
-                                                    alpha = if (isDragging) 0f else 1f
-                                                }
-                                                .pointerInput(app.packageName) {
-                                                    detectDragGesturesAfterLongPress(
-                                                        onDragStart = { offset ->
-                                                            draggingPkg = app.packageName
-                                                            activeDragApp = app
-                                                            dragOffset = Offset.Zero
-                                                            totalDragDist = 0f
-                                                            swapCount = 0
-                                                            lastSwapTime = 0L
-                                                            activeDragIsSystem = app.isSystem
-                                                            activeDragRootPos = itemRootPos + offset
-                                                        },
-                                                        onDrag = { change, dragAmount ->
-                                                            change.consume()
-                                                            dragOffset += dragAmount
-                                                            totalDragDist += dragAmount.getDistance()
-                                                            activeDragRootPos += dragAmount
+                                                .onGloballyPositioned { coords -> itemCoords = coords }
+                                                .graphicsLayer { alpha = if (isDragging) 0f else 1f }
+                                                .karuiAppHoldOrDrag(
+                                                    key = app.packageName,
+                                                    getCoords = { itemCoords },
+                                                    haptic = if (settings.hapticFeedback) haptic else null,
+                                                    onShowMenu = { onLongPressApp(app) },
+                                                    onDismissMenu = onDismissLongPressApp,
+                                                    onDragStart = { rootPos ->
+                                                        draggingPkg = app.packageName
+                                                        activeDragApp = app
+                                                        swapCount = 0
+                                                        lastSwapTime = 0L
+                                                        activeDragIsSystem = app.isSystem
+                                                        activeDragRootPos = rootPos
+                                                    },
+                                                    onDrag = { rootPos, _ ->
+                                                        activeDragRootPos = rootPos
+                                                        val gCoords = gridCoords ?: return@karuiAppHoldOrDrag
+                                                        val currentIdx = localSlots.indexOfFirst { it?.packageName == draggingPkg }
+                                                        if (currentIdx < 0) return@karuiAppHoldOrDrag
+                                                        val now = System.currentTimeMillis()
+                                                        if (now - lastSwapTime < 110L) return@karuiAppHoldOrDrag
 
-                                                            val currentIdx = localPinned.indexOfFirst { it.packageName == draggingPkg }
-                                                            if (currentIdx < 0) return@detectDragGesturesAfterLongPress
-                                                            val currentItem = gridState.layoutInfo.visibleItemsInfo
-                                                                .firstOrNull { it.index == currentIdx } ?: return@detectDragGesturesAfterLongPress
-
-                                                            val now = System.currentTimeMillis()
-                                                            if (now - lastSwapTime < 120L) return@detectDragGesturesAfterLongPress
-
-                                                            val centerX = currentItem.offset.x + currentItem.size.width / 2f + dragOffset.x
-                                                            val centerY = currentItem.offset.y + currentItem.size.height / 2f + dragOffset.y
-
-                                                            val closest = gridState.layoutInfo.visibleItemsInfo
-                                                                .filter { it.index in localPinned.indices }
-                                                                .minByOrNull { item ->
-                                                                    val ix = item.offset.x + item.size.width / 2f
-                                                                    val iy = item.offset.y + item.size.height / 2f
-                                                                    hypot(centerX - ix, centerY - iy)
-                                                                }
-                                                            if (closest != null && closest.index != currentIdx) {
-                                                                val dist = hypot(
-                                                                    centerX - (closest.offset.x + closest.size.width / 2f),
-                                                                    centerY - (closest.offset.y + closest.size.height / 2f)
-                                                                )
-                                                                if (dist < currentItem.size.width * 0.8f) {
-                                                                    val deltaX = (currentItem.offset.x - closest.offset.x).toFloat()
-                                                                    val deltaY = (currentItem.offset.y - closest.offset.y).toFloat()
-                                                                    val moved = localPinned.removeAt(currentIdx)
-                                                                    localPinned.add(closest.index, moved)
-                                                                    dragOffset = Offset(dragOffset.x + deltaX, dragOffset.y + deltaY)
-                                                                    swapCount++
-                                                                    lastSwapTime = now
-                                                                }
+                                                        val localInGrid = gCoords.windowToLocal(rootPos)
+                                                        val visible = gridState.layoutInfo.visibleItemsInfo
+                                                        val closest = visible
+                                                            .filter { it.index in localSlots.indices }
+                                                            .minByOrNull { item ->
+                                                                val ix = item.offset.x + item.size.width / 2f
+                                                                val iy = item.offset.y + item.size.height / 2f
+                                                                hypot(localInGrid.x - ix, localInGrid.y - iy)
                                                             }
-                                                        },
-                                                        onDragEnd = {
-                                                            val droppedY = activeDragRootPos.y
-                                                            val droppedX = activeDragRootPos.x
-                                                            when {
-                                                                swapCount == 0 && totalDragDist < 14f -> {
-                                                                    onLongPressApp(app)
-                                                                }
-                                                                droppedY < topDropLimitPx -> {
-                                                                    if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
-                                                                        onUninstallApp(app.packageName)
-                                                                    } else {
-                                                                        onRemoveHomeApp(app.packageName)
-                                                                    }
-                                                                }
-                                                                settings.showDock && droppedY >= dockTopY - 32f -> {
-                                                                    onMoveHomeToDock(app.packageName)
-                                                                }
-                                                                swapCount > 0 -> {
-                                                                    onSavePinnedOrder(localPinned.map { it.packageName })
-                                                                }
+                                                        if (closest != null && closest.index != currentIdx) {
+                                                            val dist = hypot(
+                                                                localInGrid.x - (closest.offset.x + closest.size.width / 2f),
+                                                                localInGrid.y - (closest.offset.y + closest.size.height / 2f)
+                                                            )
+                                                            if (dist < closest.size.width * 0.78f) {
+                                                                val moved = localSlots[currentIdx]
+                                                                localSlots[currentIdx] = localSlots[closest.index]
+                                                                localSlots[closest.index] = moved
+                                                                swapCount++
+                                                                lastSwapTime = now
                                                             }
-                                                            draggingPkg = null
-                                                            activeDragApp = null
-                                                            dragOffset = Offset.Zero
-                                                            totalDragDist = 0f
-                                                            swapCount = 0
-                                                        },
-                                                        onDragCancel = {
-                                                            draggingPkg = null
-                                                            activeDragApp = null
-                                                            dragOffset = Offset.Zero
-                                                            totalDragDist = 0f
-                                                            swapCount = 0
                                                         }
-                                                    )
-                                                }
+                                                    },
+                                                    onDragEnd = {
+                                                        val droppedY = activeDragRootPos.y
+                                                        val droppedX = activeDragRootPos.x
+                                                        when {
+                                                            droppedY < topDropLimitPx -> {
+                                                                if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
+                                                                    onUninstallApp(app.packageName)
+                                                                } else {
+                                                                    onRemoveHomeApp(app.packageName)
+                                                                }
+                                                            }
+                                                            settings.showDock && droppedY >= dockTopY - 32f -> {
+                                                                onMoveHomeToDock(app.packageName)
+                                                            }
+                                                            swapCount > 0 -> {
+                                                                onSavePinnedSlots(localSlots.map { it?.packageName })
+                                                            }
+                                                        }
+                                                        draggingPkg = null
+                                                        activeDragApp = null
+                                                        swapCount = 0
+                                                    },
+                                                    onDragCancel = {
+                                                        draggingPkg = null
+                                                        activeDragApp = null
+                                                        swapCount = 0
+                                                    }
+                                                )
                                         ) {
                                             KaruiAppTile(
                                                 app = app,
@@ -684,82 +683,81 @@ fun HomeWorkspaceScreen(
                 ) {
                     localDock.forEach { app ->
                         val isDockDragging = draggingDockPkg == app.packageName
-                        var dockItemRoot by remember { mutableStateOf(Offset.Zero) }
+                        var dockItemCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .zIndex(if (isDockDragging) 10f else 0f)
                                 .onGloballyPositioned { coords ->
-                                    dockItemRoot = coords.positionInRoot()
+                                    dockItemCoords = coords
                                 }
                                 .graphicsLayer {
                                     alpha = if (isDockDragging) 0f else 1f
                                 }
-                                .pointerInput(app.packageName) {
-                                    detectDragGesturesAfterLongPress(
-                                        onDragStart = { offset ->
-                                            draggingDockPkg = app.packageName
-                                            activeDragApp = app
-                                            dockDragX = 0f
-                                            dockTotalDist = 0f
-                                            dockSwapCount = 0
-                                            activeDragIsSystem = app.isSystem
-                                            activeDragRootPos = dockItemRoot + offset
-                                        },
-                                        onDrag = { change, dragAmount ->
-                                            change.consume()
-                                            dockDragX += dragAmount.x
-                                            dockTotalDist += dragAmount.getDistance()
-                                            activeDragRootPos += dragAmount
-                                            val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
-                                            val cellW = size.width.toFloat().coerceAtLeast(1f)
-                                            if (curIdx >= 0) {
-                                                if (dockDragX > cellW * 0.65f && curIdx < localDock.lastIndex) {
-                                                    val item = localDock.removeAt(curIdx)
-                                                    localDock.add(curIdx + 1, item)
-                                                    dockDragX -= cellW
-                                                    dockSwapCount++
-                                                } else if (dockDragX < -cellW * 0.65f && curIdx > 0) {
-                                                    val item = localDock.removeAt(curIdx)
-                                                    localDock.add(curIdx - 1, item)
-                                                    dockDragX += cellW
-                                                    dockSwapCount++
-                                                }
+                                .karuiAppHoldOrDrag(
+                                    key = app.packageName,
+                                    getCoords = { dockItemCoords },
+                                    haptic = if (settings.hapticFeedback) haptic else null,
+                                    onShowMenu = { onLongPressApp(app) },
+                                    onDismissMenu = onDismissLongPressApp,
+                                    onDragStart = { rootPos ->
+                                        draggingDockPkg = app.packageName
+                                        activeDragApp = app
+                                        dockDragX = 0f
+                                        dockTotalDist = 0f
+                                        dockSwapCount = 0
+                                        activeDragIsSystem = app.isSystem
+                                        activeDragRootPos = rootPos
+                                    },
+                                    onDrag = { rootPos, deltaRoot ->
+                                        dockDragX += deltaRoot.x
+                                        dockTotalDist += deltaRoot.getDistance()
+                                        activeDragRootPos = rootPos
+                                        val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
+                                        val cellW = (dockItemCoords?.size?.width?.toFloat() ?: 120f).coerceAtLeast(1f)
+                                        if (curIdx >= 0) {
+                                            if (dockDragX > cellW * 0.65f && curIdx < localDock.lastIndex) {
+                                                val item = localDock.removeAt(curIdx)
+                                                localDock.add(curIdx + 1, item)
+                                                dockDragX -= cellW
+                                                dockSwapCount++
+                                            } else if (dockDragX < -cellW * 0.65f && curIdx > 0) {
+                                                val item = localDock.removeAt(curIdx)
+                                                localDock.add(curIdx - 1, item)
+                                                dockDragX += cellW
+                                                dockSwapCount++
                                             }
-                                        },
-                                        onDragEnd = {
-                                            val droppedY = activeDragRootPos.y
-                                            val droppedX = activeDragRootPos.x
-                                            when {
-                                                dockSwapCount == 0 && dockTotalDist < 14f -> {
-                                                    onLongPressApp(app)
-                                                }
-                                                droppedY < topDropLimitPx -> {
-                                                    if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
-                                                        onUninstallApp(app.packageName)
-                                                    } else {
-                                                        onRemoveDockApp(app.packageName)
-                                                    }
-                                                }
-                                                dockSwapCount > 0 -> {
-                                                    onSaveDockOrder(localDock.map { it.packageName })
-                                                }
-                                            }
-                                            draggingDockPkg = null
-                                            activeDragApp = null
-                                            dockDragX = 0f
-                                            dockTotalDist = 0f
-                                            dockSwapCount = 0
-                                        },
-                                        onDragCancel = {
-                                            draggingDockPkg = null
-                                            activeDragApp = null
-                                            dockDragX = 0f
-                                            dockTotalDist = 0f
-                                            dockSwapCount = 0
                                         }
-                                    )
-                                }
+                                    },
+                                    onDragEnd = {
+                                        val droppedY = activeDragRootPos.y
+                                        val droppedX = activeDragRootPos.x
+                                        when {
+                                            droppedY < topDropLimitPx -> {
+                                                if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
+                                                    onUninstallApp(app.packageName)
+                                                } else {
+                                                    onRemoveDockApp(app.packageName)
+                                                }
+                                            }
+                                            dockSwapCount > 0 -> {
+                                                onSaveDockOrder(localDock.map { it.packageName })
+                                            }
+                                        }
+                                        draggingDockPkg = null
+                                        activeDragApp = null
+                                        dockDragX = 0f
+                                        dockTotalDist = 0f
+                                        dockSwapCount = 0
+                                    },
+                                    onDragCancel = {
+                                        draggingDockPkg = null
+                                        activeDragApp = null
+                                        dockDragX = 0f
+                                        dockTotalDist = 0f
+                                        dockSwapCount = 0
+                                    }
+                                )
                         ) {
                             KaruiAppTile(
                                 app = app,
@@ -777,16 +775,18 @@ fun HomeWorkspaceScreen(
             }
         }
 
-        // Top Action Drop Bar when dragging Home/Dock icon (Remove / Uninstall)
+        // Top Action Drop Bar when dragging Home/Dock/Drawer icon (Remove / Uninstall)
         AnimatedVisibility(
-            visible = draggingPkg != null || draggingDockPkg != null,
+            visible = isAnyDragActive,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
-            val inTopZone = activeDragRootPos.y < topDropLimitPx
-            val hoverRemove = inTopZone && (activeDragIsSystem || activeDragRootPos.x < screenWidthPx / 2f)
-            val hoverUninstall = inTopZone && !activeDragIsSystem && activeDragRootPos.x >= screenWidthPx / 2f
+            val dropPos = if (externalDragActive) externalDragPos else activeDragRootPos
+            val dropIsSys = if (externalDragActive) externalDragIsSystem else activeDragIsSystem
+            val inTopZone = dropPos.y < topDropLimitPx
+            val hoverRemove = inTopZone && (dropIsSys || dropPos.x < screenWidthPx / 2f)
+            val hoverUninstall = inTopZone && !dropIsSys && dropPos.x >= screenWidthPx / 2f
 
             Row(
                 modifier = Modifier
@@ -820,7 +820,7 @@ fun HomeWorkspaceScreen(
                     )
                 }
 
-                if (!activeDragIsSystem) {
+                if (!dropIsSys) {
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -852,8 +852,9 @@ fun HomeWorkspaceScreen(
 
         // Unclipped Floating Drag Overlay for Home & Dock icons
         activeDragApp?.let { dragged ->
-            val ox = with(density) { (activeDragRootPos.x - 36.dp.toPx()).toDp() }
-            val oy = with(density) { (activeDragRootPos.y - 56.dp.toPx()).toDp() }
+            val halfIconPx = with(density) { (settings.iconSizeDp.dp.toPx() / 2f) }
+            val ox = with(density) { (activeDragRootPos.x - homeOverlayOrigin.x - halfIconPx).toDp() }
+            val oy = with(density) { (activeDragRootPos.y - homeOverlayOrigin.y - halfIconPx).toDp() }
             Box(
                 modifier = Modifier
                     .offset(x = ox, y = oy)

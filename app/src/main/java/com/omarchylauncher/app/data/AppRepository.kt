@@ -20,8 +20,11 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
@@ -54,6 +57,7 @@ class AppRepository(private val context: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val launcherApps = context.getSystemService(LauncherApps::class.java)
     private val iconCache = android.util.LruCache<String, ImageBitmap>(256)
+    private val iconMonoCache = android.util.LruCache<String, Boolean>(256)
 
     private val _apps = MutableStateFlow<List<AppEntry>>(emptyList())
     val apps: StateFlow<List<AppEntry>> = _apps.asStateFlow()
@@ -61,9 +65,17 @@ class AppRepository(private val context: Context) {
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _newlyInstalledPackages = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val newlyInstalledPackages: SharedFlow<String> = _newlyInstalledPackages.asSharedFlow()
+
     private val callback = object : LauncherApps.Callback() {
         override fun onPackageRemoved(packageName: String?, user: UserHandle?) = refresh()
-        override fun onPackageAdded(packageName: String?, user: UserHandle?) = refresh()
+        override fun onPackageAdded(packageName: String?, user: UserHandle?) {
+            if (!packageName.isNullOrBlank() && packageName != context.packageName) {
+                _newlyInstalledPackages.tryEmit(packageName)
+            }
+            refresh()
+        }
         override fun onPackageChanged(packageName: String?, user: UserHandle?) = refresh()
         override fun onPackagesAvailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) = refresh()
         override fun onPackagesUnavailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) = refresh()
@@ -82,6 +94,8 @@ class AppRepository(private val context: Context) {
                 launcherApps.getActivityList(null, Process.myUserHandle())
             }.getOrDefault(emptyList())
 
+            val themedPackMap = buildThemedPackMap()
+
             val entries = activities
                 .filter { it.applicationInfo.packageName != myPkg }
                 .map { info ->
@@ -90,12 +104,23 @@ class AppRepository(private val context: Context) {
                     val icon = runCatching {
                         rawDrawable?.toBitmap(96, 96)?.asImageBitmap()
                     }.getOrNull()
-                    val monoIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    var monoIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         runCatching {
                             val adaptive = rawDrawable as? AdaptiveIconDrawable
                             adaptive?.monochrome?.toBitmap(96, 96)?.asImageBitmap()
                         }.getOrNull()
                     } else null
+                    if (monoIcon == null && themedPackMap.isNotEmpty()) {
+                        val pkgName = info.applicationInfo.packageName
+                        val compKey = "$pkgName/${info.componentName.className}"
+                        val spec = themedPackMap[compKey] ?: themedPackMap[pkgName]
+                        if (spec != null) {
+                            val loaded = loadIconFromSpecWithMono(spec)
+                            if (loaded != null && loaded.second) {
+                                monoIcon = loaded.first
+                            }
+                        }
+                    }
                     AppEntry(
                         packageName = info.applicationInfo.packageName,
                         activityName = info.componentName.className,
@@ -223,20 +248,109 @@ class AppRepository(private val context: Context) {
         }.getOrDefault(emptyList())
     }
 
-    fun loadIconFromSpec(spec: String): ImageBitmap? {
-        iconCache.get(spec)?.let { return it }
+    fun loadIconFromSpec(spec: String): ImageBitmap? = loadIconFromSpecWithMono(spec)?.first
+
+    fun loadIconFromSpecWithMono(spec: String): Pair<ImageBitmap, Boolean>? {
+        val cachedBmp = iconCache.get(spec)
+        val cachedMono = iconMonoCache.get(spec)
+        if (cachedBmp != null && cachedMono != null) return cachedBmp to cachedMono
         val parts = spec.split("/", limit = 2)
         if (parts.size != 2) return null
         val packPkg = parts[0]
-        val drawableName = parts[1]
+        val drawableName = parts[1].removePrefix("@drawable/")
         return runCatching {
             val res = context.packageManager.getResourcesForApplication(packPkg)
             val id = res.getIdentifier(drawableName, "drawable", packPkg)
             if (id == 0) return null
             val drawable = res.getDrawable(id, null) ?: return null
-            val bmp = drawable.toBitmap(96, 96).asImageBitmap()
+            val rawBmp = drawable.toBitmap(96, 96)
+            val isMono = isMonochromeBitmap(rawBmp)
+            val bmp = rawBmp.asImageBitmap()
             iconCache.put(spec, bmp)
-            bmp
+            iconMonoCache.put(spec, isMono)
+            bmp to isMono
         }.getOrNull()
+    }
+
+    private fun isMonochromeBitmap(bmp: android.graphics.Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+        if (w <= 0 || h <= 0) return false
+        var total = 0
+        var transparent = 0
+        var opaque = 0
+        var chromaSum = 0L
+        val step = 4
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                val px = bmp.getPixel(x, y)
+                val a = (px ushr 24) and 0xFF
+                total++
+                if (a < 32) {
+                    transparent++
+                } else {
+                    opaque++
+                    val r = (px ushr 16) and 0xFF
+                    val g = (px ushr 8) and 0xFF
+                    val b = px and 0xFF
+                    val maxC = maxOf(r, maxOf(g, b))
+                    val minC = minOf(r, minOf(g, b))
+                    chromaSum += (maxC - minC)
+                }
+                x += step
+            }
+            y += step
+        }
+        if (total == 0 || opaque == 0) return false
+        val transparentRatio = transparent.toFloat() / total.toFloat()
+        val avgChroma = chromaSum.toFloat() / opaque.toFloat()
+        return transparentRatio >= 0.15f && avgChroma < 28f
+    }
+
+    private fun buildThemedPackMap(): Map<String, String> {
+        val pm = context.packageManager
+        val resolved = runCatching {
+            pm.queryIntentActivities(Intent("app.lawnchair.icons.THEMED_ICON"), PackageManager.MATCH_DEFAULT_ONLY)
+        }.getOrDefault(emptyList())
+        if (resolved.isEmpty()) return emptyMap()
+
+        val map = HashMap<String, String>(512)
+        for (ri in resolved) {
+            val packPkg = ri.activityInfo.packageName
+            runCatching {
+                val res = pm.getResourcesForApplication(packPkg)
+                for (xmlName in listOf("grayscale_icon_map", "appfilter")) {
+                    val xmlId = res.getIdentifier(xmlName, "xml", packPkg)
+                    if (xmlId == 0) continue
+                    val parser = res.getXml(xmlId)
+                    var eventType = parser.eventType
+                    while (eventType != XmlPullParser.END_DOCUMENT) {
+                        if (eventType == XmlPullParser.START_TAG) {
+                            val drawable = parser.getAttributeValue(null, "drawable")?.removePrefix("@drawable/")
+                            val pkg = parser.getAttributeValue(null, "package")
+                            val comp = parser.getAttributeValue(null, "component")
+                            if (!drawable.isNullOrBlank()) {
+                                val spec = "$packPkg/$drawable"
+                                if (!pkg.isNullOrBlank()) {
+                                    map.putIfAbsent(pkg, spec)
+                                }
+                                if (!comp.isNullOrBlank() && comp.startsWith("ComponentInfo{") && comp.endsWith("}")) {
+                                    val inner = comp.substring("ComponentInfo{".length, comp.length - 1)
+                                    map.putIfAbsent(inner, spec)
+                                    val slashIdx = inner.indexOf('/')
+                                    if (slashIdx > 0) {
+                                        map.putIfAbsent(inner.substring(0, slashIdx), spec)
+                                    }
+                                }
+                            }
+                        }
+                        eventType = parser.next()
+                    }
+                }
+            }
+        }
+        return map
     }
 }

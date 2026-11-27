@@ -70,12 +70,16 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val _isWeatherRefreshing = MutableStateFlow(false)
     val isWeatherRefreshing: StateFlow<Boolean> = _isWeatherRefreshing.asStateFlow()
 
-    val pinnedHomeApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
+    val pinnedHomeSlots: StateFlow<List<AppEntry?>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
-        s.pinnedHomePackages.distinct().mapNotNull { pkg ->
-            map[pkg]?.let { applyOverrides(it, s) }
+        s.pinnedHomeSlots.map { pkg ->
+            if (pkg == null) null else map[pkg]?.let { applyOverrides(it, s) }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pinnedHomeApps: StateFlow<List<AppEntry>> = pinnedHomeSlots
+        .combine(settings) { slots, _ -> slots.filterNotNull() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dockApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
@@ -91,15 +95,22 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private fun applyOverrides(entry: AppEntry, s: LauncherSettings): AppEntry {
         val customLbl = s.customLabels[entry.packageName]
         val customIcoSpec = s.customIcons[entry.packageName]
-        val customBitmap = if (!customIcoSpec.isNullOrBlank()) {
-            app.appRepository.loadIconFromSpec(customIcoSpec)
+        val customLoaded = if (!customIcoSpec.isNullOrBlank()) {
+            app.appRepository.loadIconFromSpecWithMono(customIcoSpec)
         } else null
-        return entry.copy(
-            label = customLbl ?: entry.label,
-            icon = customBitmap ?: entry.icon,
-            monochromeIcon = if (customBitmap != null) null else entry.monochromeIcon,
-            hasCustomIcon = customBitmap != null
-        )
+        return if (customLoaded != null) {
+            val (bmp, isMono) = customLoaded
+            entry.copy(
+                label = customLbl ?: entry.label,
+                icon = bmp,
+                monochromeIcon = if (isMono) bmp else null,
+                hasCustomIcon = !isMono
+            )
+        } else {
+            entry.copy(
+                label = customLbl ?: entry.label
+            )
+        }
     }
 
     private var latestSensorSteps: Int = -1
@@ -108,8 +119,23 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     init {
         refreshPrivileges()
         seedDefaultAppsOnce()
+        observeNewPackages()
         registerStepSensor()
         startClockAndWeatherTicker()
+    }
+
+    private fun observeNewPackages() {
+        viewModelScope.launch {
+            app.appRepository.newlyInstalledPackages.collect { pkg ->
+                val s = settings.value
+                if (s.autoAddNewAppsToHome &&
+                    pkg !in s.pinnedHomePackages &&
+                    pkg !in s.hiddenPackages
+                ) {
+                    app.preferences.addPinnedHomeAt(pkg)
+                }
+            }
+        }
     }
 
     private fun registerStepSensor() {
@@ -440,8 +466,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setIconSizeDp(v: Int) = viewModelScope.launch { app.preferences.setIconSizeDp(v) }
     fun setDrawerBgAlpha(v: Float) = viewModelScope.launch { app.preferences.setDrawerBgAlpha(v) }
     fun setShowDrawerTabs(v: Boolean) = viewModelScope.launch { app.preferences.setShowDrawerTabs(v) }
+    fun setAutoAddNewAppsToHome(v: Boolean) = viewModelScope.launch { app.preferences.setAutoAddNewAppsToHome(v) }
     fun reorderPinnedHome(fromIndex: Int, toIndex: Int) = viewModelScope.launch { app.preferences.reorderPinnedHome(fromIndex, toIndex) }
     fun setPinnedHomePackages(pkgs: List<String>) = viewModelScope.launch { app.preferences.setPinnedHomePackages(pkgs) }
+    fun setPinnedHomeSlots(slots: List<String?>) = viewModelScope.launch { app.preferences.setPinnedHomeSlots(slots) }
     fun setDockPackages(pkgs: List<String>) = viewModelScope.launch { app.preferences.setDockPackages(pkgs) }
     fun addPinnedHomeAt(pkg: String, index: Int? = null) = viewModelScope.launch { app.preferences.addPinnedHomeAt(pkg, index) }
     fun addDockPackage(pkg: String) = viewModelScope.launch { app.preferences.addDockPackage(pkg) }

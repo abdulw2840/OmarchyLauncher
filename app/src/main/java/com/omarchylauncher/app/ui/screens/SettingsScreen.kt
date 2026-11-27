@@ -84,6 +84,7 @@ fun SettingsScreen(
     onSetShowSearchBar: (Boolean) -> Unit,
     onSetShowDock: (Boolean) -> Unit,
     onSetShowHomeLabels: (Boolean) -> Unit,
+    onSetAutoAddNewAppsToHome: (Boolean) -> Unit,
     onSetMonochromeIcons: (Boolean) -> Unit,
     onSetIconShape: (IconShape) -> Unit,
     onSetIconSizeDp: (Int) -> Unit,
@@ -261,6 +262,10 @@ fun SettingsScreen(
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
                             ToggleRow("Show Dock", "Pinned quick-launch row at bottom", settings.showDock, onSetShowDock)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            ToggleRow("Add New Apps to Home", "Automatically pin newly installed apps", settings.autoAddNewAppsToHome, onSetAutoAddNewAppsToHome)
                             Spacer(modifier = Modifier.height(10.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))

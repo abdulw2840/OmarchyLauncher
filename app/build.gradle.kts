@@ -12,8 +12,8 @@ android {
         applicationId = "com.omarchylauncher.app"
         minSdk = 31
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.9.0"
+        versionCode = 10
+        versionName = "1.10.0"
 
         vectorDrawables {
             useSupportLibrary = true

@@ -39,7 +39,8 @@ data class LauncherSettings(
     val drawerColumns: Int = 4,
     val drawerListMode: Boolean = false,
     val drawerBgAlpha: Float = 0.96f,
-    val showDrawerTabs: Boolean = true,
+    val showDrawerTabs: Boolean = false,
+    val autoAddNewAppsToHome: Boolean = true,
     val showAtAGlance: Boolean = true,
     val showSearchBar: Boolean = true,
     val showDock: Boolean = true,
@@ -62,6 +63,7 @@ data class LauncherSettings(
     val showSteps: Boolean = false,
     val showScreenTime: Boolean = false,
     val extraPagesCount: Int = 0,
+    val pinnedHomeSlots: List<String?> = emptyList(),
     val pinnedHomePackages: List<String> = emptyList(),
     val dockPackages: List<String> = emptyList(),
     val hiddenPackages: Set<String> = emptySet(),
@@ -87,6 +89,7 @@ class LauncherPreferences(private val context: Context) {
         val DRAWER_LIST_MODE = booleanPreferencesKey("drawer_list_mode")
         val DRAWER_BG_ALPHA = floatPreferencesKey("drawer_bg_alpha")
         val SHOW_DRAWER_TABS = booleanPreferencesKey("show_drawer_tabs")
+        val AUTO_ADD_NEW_APPS = booleanPreferencesKey("auto_add_new_apps")
         val SHOW_AT_A_GLANCE = booleanPreferencesKey("show_at_a_glance")
         val SHOW_SEARCH_BAR = booleanPreferencesKey("show_search_bar")
         val SHOW_DOCK = booleanPreferencesKey("show_dock")
@@ -140,7 +143,8 @@ class LauncherPreferences(private val context: Context) {
             drawerColumns = (p[Keys.DRAWER_COLS] ?: 4).coerceIn(3, 6),
             drawerListMode = p[Keys.DRAWER_LIST_MODE] ?: false,
             drawerBgAlpha = (p[Keys.DRAWER_BG_ALPHA] ?: 0.96f).coerceIn(0.4f, 1.0f),
-            showDrawerTabs = p[Keys.SHOW_DRAWER_TABS] ?: true,
+            showDrawerTabs = p[Keys.SHOW_DRAWER_TABS] ?: false,
+            autoAddNewAppsToHome = p[Keys.AUTO_ADD_NEW_APPS] ?: true,
             showAtAGlance = p[Keys.SHOW_AT_A_GLANCE] ?: true,
             showSearchBar = p[Keys.SHOW_SEARCH_BAR] ?: true,
             showDock = p[Keys.SHOW_DOCK] ?: true,
@@ -163,7 +167,8 @@ class LauncherPreferences(private val context: Context) {
             showSteps = p[Keys.SHOW_STEPS] ?: false,
             showScreenTime = p[Keys.SHOW_SCREEN_TIME] ?: false,
             extraPagesCount = (p[Keys.EXTRA_PAGES] ?: 0).coerceIn(0, 4),
-            pinnedHomePackages = parseCsv(p[Keys.PINNED_HOME]),
+            pinnedHomeSlots = parseSlotCsv(p[Keys.PINNED_HOME]),
+            pinnedHomePackages = parseSlotCsv(p[Keys.PINNED_HOME]).filterNotNull(),
             dockPackages = parseCsv(p[Keys.DOCK_PKGS]),
             hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet(),
             frozenPackages = p[Keys.FROZEN_PKGS] ?: emptySet(),
@@ -194,7 +199,26 @@ class LauncherPreferences(private val context: Context) {
     }
 
     private fun parseCsv(raw: String?): List<String> =
-        raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+        raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() && it != "_" } ?: emptyList()
+
+    private fun parseSlotCsv(raw: String?): List<String?> {
+        if (raw.isNullOrBlank()) return emptyList()
+        val seen = HashSet<String>()
+        val result = raw.split(",").map { it.trim() }.filter { it.isNotEmpty() }.map { token ->
+            if (token == "_" || !seen.add(token)) null else token
+        }.toMutableList()
+        while (result.isNotEmpty() && result.last() == null) result.removeAt(result.lastIndex)
+        return result
+    }
+
+    private fun encodeSlotCsv(slots: List<String?>): String {
+        val seen = HashSet<String>()
+        val trimmed = slots.map { pkg ->
+            if (pkg.isNullOrBlank() || !seen.add(pkg)) null else pkg
+        }.toMutableList()
+        while (trimmed.isNotEmpty() && trimmed.last() == null) trimmed.removeAt(trimmed.lastIndex)
+        return trimmed.joinToString(",") { it ?: "_" }
+    }
 
     private fun parseIntCsv(raw: String?): List<Int> =
         parseCsv(raw).mapNotNull { it.toIntOrNull() }
@@ -211,6 +235,7 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setDrawerListMode(value: Boolean) = context.dataStore.edit { it[Keys.DRAWER_LIST_MODE] = value }
     suspend fun setDrawerBgAlpha(value: Float) = context.dataStore.edit { it[Keys.DRAWER_BG_ALPHA] = value.coerceIn(0.4f, 1.0f) }
     suspend fun setShowDrawerTabs(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_DRAWER_TABS] = value }
+    suspend fun setAutoAddNewAppsToHome(value: Boolean) = context.dataStore.edit { it[Keys.AUTO_ADD_NEW_APPS] = value }
     suspend fun setShowAtAGlance(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_AT_A_GLANCE] = value }
     suspend fun setShowSearchBar(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_SEARCH_BAR] = value }
     suspend fun setShowDock(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_DOCK] = value }
@@ -240,26 +265,39 @@ class LauncherPreferences(private val context: Context) {
 
     suspend fun togglePinnedHome(pkg: String) {
         context.dataStore.edit { p ->
-            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
-            if (list.contains(pkg)) list.remove(pkg) else list.add(pkg)
-            p[Keys.PINNED_HOME] = list.joinToString(",")
+            val list = parseSlotCsv(p[Keys.PINNED_HOME]).toMutableList()
+            val existingIdx = list.indexOf(pkg)
+            if (existingIdx >= 0) {
+                list[existingIdx] = null
+            } else {
+                val emptyIdx = list.indexOfFirst { it == null }
+                if (emptyIdx >= 0) list[emptyIdx] = pkg else list.add(pkg)
+            }
+            p[Keys.PINNED_HOME] = encodeSlotCsv(list)
         }
     }
 
     suspend fun reorderPinnedHome(fromIndex: Int, toIndex: Int) {
         context.dataStore.edit { p ->
-            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
+            val list = parseSlotCsv(p[Keys.PINNED_HOME]).toMutableList()
             if (fromIndex in list.indices && toIndex in list.indices && fromIndex != toIndex) {
-                val item = list.removeAt(fromIndex)
-                list.add(toIndex, item)
-                p[Keys.PINNED_HOME] = list.joinToString(",")
+                val item = list[fromIndex]
+                list[fromIndex] = list[toIndex]
+                list[toIndex] = item
+                p[Keys.PINNED_HOME] = encodeSlotCsv(list)
             }
         }
     }
 
     suspend fun setPinnedHomePackages(pkgs: List<String>) {
         context.dataStore.edit { p ->
-            p[Keys.PINNED_HOME] = pkgs.distinct().joinToString(",")
+            p[Keys.PINNED_HOME] = encodeSlotCsv(pkgs)
+        }
+    }
+
+    suspend fun setPinnedHomeSlots(slots: List<String?>) {
+        context.dataStore.edit { p ->
+            p[Keys.PINNED_HOME] = encodeSlotCsv(slots)
         }
     }
 
@@ -271,10 +309,23 @@ class LauncherPreferences(private val context: Context) {
 
     suspend fun addPinnedHomeAt(pkg: String, index: Int? = null) {
         context.dataStore.edit { p ->
-            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
-            list.remove(pkg)
-            if (index != null && index in 0..list.size) list.add(index, pkg) else list.add(pkg)
-            p[Keys.PINNED_HOME] = list.joinToString(",")
+            val list = parseSlotCsv(p[Keys.PINNED_HOME]).toMutableList()
+            for (i in list.indices) {
+                if (list[i] == pkg) list[i] = null
+            }
+            if (index != null && index >= 0) {
+                while (list.size <= index) list.add(null)
+                if (list[index] == null) {
+                    list[index] = pkg
+                } else {
+                    val emptyIdx = list.indexOfFirst { it == null }
+                    if (emptyIdx >= 0) list[emptyIdx] = pkg else list.add(pkg)
+                }
+            } else {
+                val emptyIdx = list.indexOfFirst { it == null }
+                if (emptyIdx >= 0) list[emptyIdx] = pkg else list.add(pkg)
+            }
+            p[Keys.PINNED_HOME] = encodeSlotCsv(list)
         }
     }
 
@@ -304,17 +355,21 @@ class LauncherPreferences(private val context: Context) {
 
     suspend fun removePinnedHome(pkg: String) {
         context.dataStore.edit { p ->
-            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
-            list.remove(pkg)
-            p[Keys.PINNED_HOME] = list.joinToString(",")
+            val list = parseSlotCsv(p[Keys.PINNED_HOME]).toMutableList()
+            for (i in list.indices) {
+                if (list[i] == pkg) list[i] = null
+            }
+            p[Keys.PINNED_HOME] = encodeSlotCsv(list)
         }
     }
 
     suspend fun moveHomeToDock(pkg: String) {
         context.dataStore.edit { p ->
-            val home = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
-            home.remove(pkg)
-            p[Keys.PINNED_HOME] = home.joinToString(",")
+            val home = parseSlotCsv(p[Keys.PINNED_HOME]).toMutableList()
+            for (i in home.indices) {
+                if (home[i] == pkg) home[i] = null
+            }
+            p[Keys.PINNED_HOME] = encodeSlotCsv(home)
             val dock = parseCsv(p[Keys.DOCK_PKGS]).toMutableList()
             if (!dock.contains(pkg) && dock.size < 6) {
                 dock.add(pkg)

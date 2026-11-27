@@ -70,6 +70,7 @@ class SettingsActivity : ComponentActivity() {
                     onSetShowSearchBar = viewModel::setShowSearchBar,
                     onSetShowDock = viewModel::setShowDock,
                     onSetShowHomeLabels = viewModel::setShowHomeLabels,
+                    onSetAutoAddNewAppsToHome = viewModel::setAutoAddNewAppsToHome,
                     onSetMonochromeIcons = viewModel::setMonochromeIcons,
                     onSetIconShape = viewModel::setIconShape,
                     onSetIconSizeDp = viewModel::setIconSizeDp,
