@@ -155,18 +155,6 @@ fun HomeWorkspaceScreen(
     var activeDragIsSystem by remember { mutableStateOf(false) }
     var activeDragApp by remember { mutableStateOf<AppEntry?>(null) }
 
-    val isAnyDragActive = draggingPkg != null || draggingDockPkg != null || externalDragActive
-    val workspaceScale by animateFloatAsState(
-        targetValue = if (isAnyDragActive) 0.88f else 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "wsScale"
-    )
-    val workspaceOffsetYPx by animateFloatAsState(
-        targetValue = if (isAnyDragActive) with(density) { 46.dp.toPx() } else 0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
-        label = "wsOffsetY"
-    )
-
     var showHomeMenu by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
     var widgetToManage by remember { mutableStateOf<Int?>(null) }
@@ -197,6 +185,18 @@ fun HomeWorkspaceScreen(
             localDock.addAll(dockApps)
         }
     }
+
+    val isAnyDragActive = draggingPkg != null || draggingDockPkg != null || externalDragActive
+    val workspaceScale by animateFloatAsState(
+        targetValue = if (isAnyDragActive) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "wsScale"
+    )
+    val workspaceOffsetYPx by animateFloatAsState(
+        targetValue = if (isAnyDragActive) with(density) { 46.dp.toPx() } else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "wsOffsetY"
+    )
 
     val hasWidgetsPage = settings.widgetIds.isNotEmpty() || settings.extraPagesCount > 0
     val totalPages = 1 + maxOf(settings.extraPagesCount, if (settings.widgetIds.isNotEmpty()) 1 else 0)
