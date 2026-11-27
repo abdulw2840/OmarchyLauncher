@@ -171,12 +171,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        runCatching {
-            val mode = display?.supportedModes?.maxByOrNull { it.refreshRate }
-            if (mode != null) {
-                window.attributes = window.attributes.apply { preferredDisplayModeId = mode.modeId }
-            }
-        }
+        // Let Android's display policy select the refresh rate. Forcing the highest
+        // supported mode can cause mode-switch churn and hurt power/perceived smoothness
+        // on devices with adaptive refresh-rate displays.
 
         appWidgetManager = AppWidgetManager.getInstance(this)
         // [EXP-WIDGET-LONGPRESS] Use OmarchyAppWidgetHost so holding anywhere on a widget opens customization
