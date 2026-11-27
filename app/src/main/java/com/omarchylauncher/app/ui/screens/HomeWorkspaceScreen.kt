@@ -205,7 +205,7 @@ fun HomeWorkspaceScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        items(pinnedApps, key = { it.packageName }) { app ->
+                        items(pinnedApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
                             KaruiAppTile(
                                 app = app,
                                 showLabel = settings.showHomeLabels,

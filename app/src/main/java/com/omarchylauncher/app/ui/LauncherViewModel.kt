@@ -49,12 +49,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     val pinnedHomeApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
-        s.pinnedHomePackages.mapNotNull { map[it] }
+        s.pinnedHomePackages.distinct().mapNotNull { map[it] }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dockApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
-        s.dockPackages.mapNotNull { map[it] }
+        s.dockPackages.distinct().mapNotNull { map[it] }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
@@ -90,9 +90,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                         "com.google.android.GoogleCamera", "com.android.camera2"
                     )
                     val availablePkgs = list.map { it.packageName }.toSet()
-                    val dockDefaults = dockCandidates.filter { it in availablePkgs }.take(4)
-                        .ifEmpty { list.take(4).map { it.packageName } }
-                    val homeDefaults = list.filter { it.packageName !in dockDefaults }.take(8).map { it.packageName }
+                    val dockDefaults = dockCandidates.filter { it in availablePkgs }.distinct().take(4)
+                        .ifEmpty { list.map { it.packageName }.distinct().take(4) }
+                    val homeDefaults = list.map { it.packageName }.distinct()
+                        .filter { it !in dockDefaults }.take(8)
                     app.preferences.seedDefaultsIfEmpty(dockDefaults, homeDefaults)
                     return@collect
                 }

@@ -80,6 +80,7 @@ class AppRepository(private val context: Context) {
                         icon = icon
                     )
                 }
+                .distinctBy { "${it.packageName}/${it.activityName}" }
                 .sortedBy { it.label.lowercase() }
 
             _apps.value = entries
