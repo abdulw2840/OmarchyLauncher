@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity() {
             var showWidgetPicker by remember { mutableStateOf(false) }
             var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
             var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
-            var latestRootPointer by remember { mutableStateOf(Offset.Zero) }
+            val latestRootPointer = remember { java.util.concurrent.atomic.AtomicReference(Offset.Zero) }
             var dockTopY by remember { mutableStateOf(Float.MAX_VALUE) }
             var homeDropSlotResolver by remember { mutableStateOf<(Offset) -> Int?>({ null }) }
 
@@ -245,11 +245,11 @@ class MainActivity : ComponentActivity() {
                         .pointerInput(Unit) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                latestRootPointer = down.position
+                                latestRootPointer.set(down.position)
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     val ch = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    latestRootPointer = ch.position
+                                    latestRootPointer.set(ch.position)
                                     if (!ch.pressed) break
                                 }
                             }
@@ -369,7 +369,7 @@ class MainActivity : ComponentActivity() {
                                 onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) },
                                 onDragToHomeStart = { app ->
                                     draggingDrawerApp = app
-                                    draggingDrawerPos = latestRootPointer
+                                    draggingDrawerPos = latestRootPointer.get()
                                 },
                                 onDragToHomeMove = {
                                     draggingDrawerPos = latestRootPointer
