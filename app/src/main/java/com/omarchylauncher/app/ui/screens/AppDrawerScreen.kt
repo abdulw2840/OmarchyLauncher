@@ -69,6 +69,7 @@ import com.omarchylauncher.app.ui.components.KaruiPivotHeader
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
+import java.util.Locale
 
 @Composable
 fun AppDrawerScreen(
