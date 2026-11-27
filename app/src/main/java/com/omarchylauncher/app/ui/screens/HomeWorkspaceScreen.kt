@@ -124,6 +124,13 @@ import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.hypot
 
+private data class DragFeedback(
+    val dockHighlighted: Boolean = false,
+    val hoverDockSlot: Int? = null,
+    val hoverRemove: Boolean = false,
+    val hoverUninstall: Boolean = false
+)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun HomeWorkspaceScreen(
@@ -183,7 +190,8 @@ fun HomeWorkspaceScreen(
     var dockTopY by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var dockLeftX by remember { mutableFloatStateOf(0f) }
     var dockWidthPx by remember { mutableFloatStateOf(screenWidthPx) }
-    var activeDragOverlayPos by remember { mutableStateOf(Offset.Zero) }
+    var dragFrameTick by remember { mutableIntStateOf(0) }
+    var dragFeedback by remember { mutableStateOf(DragFeedback()) }
     var activeDragIsSystem by remember { mutableStateOf(false) }
     var activeDragApp by remember { mutableStateOf<AppEntry?>(null) }
 
@@ -216,6 +224,36 @@ fun HomeWorkspaceScreen(
     var dockSwapCount by remember { mutableIntStateOf(0) }
     val localDock = remember { mutableStateListOf<AppEntry>() }
     var dockDragSnapshot by remember { mutableStateOf<List<AppEntry>?>(null) }
+
+    // Keep high-frequency pointer movement in the graphics layer. Only publish hover
+    // state when the pointer crosses a meaningful drop target or dock slot.
+    fun updateLocalDragFeedback(isSystem: Boolean, incomingPackage: String?, allowDockPlaceholder: Boolean) {
+        val pointer = latestPointerInOverlay.get()
+        val rootPos = homeOverlayCoords?.localToRoot(pointer) ?: pointer
+        val inTopZone = rootPos.y < topDropLimitPx
+        val dockHighlighted = allowDockPlaceholder &&
+            settings.showDock &&
+            rootPos.y >= dockTopY - 32f
+        val wantsPlaceholder = dockHighlighted &&
+            incomingPackage != null &&
+            localDock.none { it.packageName == incomingPackage } &&
+            localDock.size < 6
+        val displaySlotCount = (localDock.size + if (wantsPlaceholder) 1 else 0).coerceAtLeast(1)
+        val hoverSlot = if (wantsPlaceholder && dockWidthPx > 0f) {
+            (((rootPos.x - dockLeftX) / dockWidthPx) * displaySlotCount)
+                .toInt()
+                .coerceIn(0, localDock.size)
+        } else null
+        val next = DragFeedback(
+            dockHighlighted = dockHighlighted,
+            hoverDockSlot = hoverSlot,
+            hoverRemove = inTopZone && (isSystem || rootPos.x < screenWidthPx / 2f),
+            hoverUninstall = inTopZone && !isSystem && rootPos.x >= screenWidthPx / 2f
+        )
+        if (next != dragFeedback) dragFeedback = next
+        dragFrameTick++
+    }
+
     LaunchedEffect(dockApps, draggingDockPkg) {
         if (draggingDockPkg == null) {
             localDock.clear()
@@ -598,10 +636,15 @@ fun HomeWorkspaceScreen(
                                                         swapCount = 0
                                                         lastSwapTime = 0L
                                                         activeDragIsSystem = app.isSystem
-                                                        activeDragOverlayPos = latestPointerInOverlay.get()
+                                                        dragFeedback = DragFeedback()
+                                                        dragFrameTick++
                                                     },
                                                     onDrag = {
-                                                        activeDragOverlayPos = latestPointerInOverlay.get()
+                                                        updateLocalDragFeedback(
+                                                            isSystem = app.isSystem,
+                                                            incomingPackage = app.packageName,
+                                                            allowDockPlaceholder = true
+                                                        )
                                                         val gCoords = gridCoords ?: return@karuiAppHoldOrDrag
                                                         val hCoords = homeOverlayCoords ?: return@karuiAppHoldOrDrag
                                                         val currentIdx = localSlots.indexOfFirst { it?.packageName == draggingPkg }
@@ -634,7 +677,8 @@ fun HomeWorkspaceScreen(
                                                         }
                                                     },
                                                     onDragEnd = {
-                                                        val rootPos = homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos
+                                                        val pointer = latestPointerInOverlay.get()
+                                                        val rootPos = homeOverlayCoords?.localToRoot(pointer) ?: pointer
                                                         val droppedY = rootPos.y
                                                         val droppedX = rootPos.x
                                                         when {
@@ -662,6 +706,7 @@ fun HomeWorkspaceScreen(
                                                         activeDragApp = null
                                                         swapCount = 0
                                                         gridDragSnapshot = null
+                                                        dragFeedback = DragFeedback()
                                                     },
                                                     onDragCancel = {
                                                         gridDragSnapshot?.let { snapshot ->
@@ -672,6 +717,7 @@ fun HomeWorkspaceScreen(
                                                         draggingPkg = null
                                                         activeDragApp = null
                                                         swapCount = 0
+                                                        dragFeedback = DragFeedback()
                                                     }
                                                 )
                                             ) {
@@ -848,14 +894,21 @@ fun HomeWorkspaceScreen(
             // [EXP-DOCK-ANIM] Smooth animated BoxWithConstraints dock with wiggle & live hover slot spacing
             if (settings.showDock && (localDock.isNotEmpty() || externalDragActive || draggingPkg != null)) {
                 Spacer(modifier = Modifier.height(10.dp))
-                val dragRootPos = if (externalDragActive) externalDragPos else (homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos)
-                val dockHighlighted = (draggingPkg != null || externalDragActive) && dragRootPos.y >= dockTopY - 32f
                 val incomingPkg = if (externalDragActive) externalDragPkg else draggingPkg
-                val isHoveringNewForDock = dockHighlighted && incomingPkg != null && localDock.none { it.packageName == incomingPkg } && localDock.size < 6
+                val dockHighlighted = if (externalDragActive) {
+                    externalDragPos.y >= dockTopY - 32f
+                } else {
+                    dragFeedback.dockHighlighted
+                }
+                val hoverSlot = if (externalDragActive && dockHighlighted && incomingPkg != null &&
+                    localDock.none { it.packageName == incomingPkg } && localDock.size < 6 && dockWidthPx > 0f
+                ) {
+                    val displayCount = (localDock.size + 1).coerceAtLeast(1)
+                    (((externalDragPos.x - dockLeftX) / dockWidthPx) * displayCount)
+                        .toInt().coerceIn(0, localDock.size)
+                } else if (externalDragActive) null else dragFeedback.hoverDockSlot
+                val isHoveringNewForDock = hoverSlot != null
                 val displaySlotCount = (localDock.size + if (isHoveringNewForDock) 1 else 0).coerceAtLeast(1)
-                val hoverSlot = if (isHoveringNewForDock && dockWidthPx > 0f) {
-                    (((dragRootPos.x - dockLeftX) / dockWidthPx) * displaySlotCount).toInt().coerceIn(0, localDock.size)
-                } else null
 
                 val wiggleTransition = rememberInfiniteTransition(label = "dockWiggle")
                 val wiggleDeg by wiggleTransition.animateFloat(
@@ -960,10 +1013,15 @@ fun HomeWorkspaceScreen(
                                                 lastDockPointerX = latestPointerInOverlay.get().x
                                                 dockSwapCount = 0
                                                 activeDragIsSystem = app.isSystem
-                                                activeDragOverlayPos = latestPointerInOverlay.get()
+                                                dragFeedback = DragFeedback()
+                                                dragFrameTick++
                                             },
                                             onDrag = {
-                                                activeDragOverlayPos = latestPointerInOverlay.get()
+                                                updateLocalDragFeedback(
+                                                    isSystem = app.isSystem,
+                                                    incomingPackage = app.packageName,
+                                                    allowDockPlaceholder = false
+                                                )
                                                 dockDragX += (latestPointerInOverlay.get().x - lastDockPointerX)
                                                 lastDockPointerX = latestPointerInOverlay.get().x
                                                 val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
@@ -983,7 +1041,8 @@ fun HomeWorkspaceScreen(
                                                 }
                                             },
                                             onDragEnd = {
-                                                val rootPos = homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos
+                                                val pointer = latestPointerInOverlay.get()
+                                                val rootPos = homeOverlayCoords?.localToRoot(pointer) ?: pointer
                                                 val droppedY = rootPos.y
                                                 val droppedX = rootPos.x
                                                 when {
@@ -1005,6 +1064,7 @@ fun HomeWorkspaceScreen(
                                                 dockDragX = 0f
                                                 dockSwapCount = 0
                                                 dockDragSnapshot = null
+                                                dragFeedback = DragFeedback()
                                             },
                                             onDragCancel = {
                                                 dockDragSnapshot?.let { snapshot ->
@@ -1016,6 +1076,7 @@ fun HomeWorkspaceScreen(
                                                 activeDragApp = null
                                                 dockDragX = 0f
                                                 dockSwapCount = 0
+                                                dragFeedback = DragFeedback()
                                             }
                                         )
                                 ) {
@@ -1044,11 +1105,15 @@ fun HomeWorkspaceScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
-            val dropPos = if (externalDragActive) externalDragPos else (homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos)
             val dropIsSys = if (externalDragActive) externalDragIsSystem else activeDragIsSystem
-            val inTopZone = dropPos.y < topDropLimitPx
-            val hoverRemove = inTopZone && (dropIsSys || dropPos.x < screenWidthPx / 2f)
-            val hoverUninstall = inTopZone && !dropIsSys && dropPos.x >= screenWidthPx / 2f
+            val hoverRemove = if (externalDragActive) {
+                externalDragPos.y < topDropLimitPx &&
+                    (dropIsSys || externalDragPos.x < screenWidthPx / 2f)
+            } else dragFeedback.hoverRemove
+            val hoverUninstall = if (externalDragActive) {
+                externalDragPos.y < topDropLimitPx &&
+                    !dropIsSys && externalDragPos.x >= screenWidthPx / 2f
+            } else dragFeedback.hoverUninstall
 
             Row(
                 modifier = Modifier
@@ -1162,14 +1227,20 @@ fun HomeWorkspaceScreen(
         activeDragApp?.let { dragged ->
             val tileW = (settings.iconSizeDp * scale + 12).dp
             val halfTilePx = with(density) { tileW.toPx() / 2f }
-            val ox = with(density) { (activeDragOverlayPos.x - halfTilePx).toDp() }
-            val oy = with(density) { (activeDragOverlayPos.y - halfTilePx).toDp() }
             Box(
                 modifier = Modifier
-                    .offset(x = ox, y = oy)
                     .width(tileW)
                     .zIndex(50f)
-                    .graphicsLayer { scaleX = 1.12f; scaleY = 1.12f }
+                    .graphicsLayer {
+                        // Read the frame tick in the layer phase so pointer movement updates
+                        // the floating icon without recomposing the workspace.
+                        dragFrameTick
+                        val pointer = latestPointerInOverlay.get()
+                        translationX = pointer.x - halfTilePx
+                        translationY = pointer.y - halfTilePx
+                        scaleX = 1.12f
+                        scaleY = 1.12f
+                    }
             ) {
                 KaruiAppTile(
                     app = dragged,
