@@ -132,6 +132,7 @@ fun AppDrawerScreen(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    var drawerGestureCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     var query by remember { mutableStateOf("") }
     val tabs = if (settings.showDrawerTabs) listOf("all", "user", "system") else emptyList()
@@ -182,6 +183,10 @@ fun AppDrawerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.bg.copy(alpha = settings.drawerBgAlpha))
+            // Convert pointer samples back to root coordinates. This layer is translated
+            // during the drag; local coordinates otherwise feed that translation back
+            // into the next delta and make slow swipes oscillate.
+            .onGloballyPositioned { drawerGestureCoordinates = it }
             .pointerInput(settings.drawerListMode) {
                 val touchSlop = viewConfiguration.touchSlop
                 awaitEachGesture {
@@ -189,7 +194,7 @@ fun AppDrawerScreen(
                     var totalDx = 0f
                     var totalDy = 0f
                     var lastDy = 0f
-                    var lastPos = down.position
+                    var lastPos = drawerGestureCoordinates?.localToRoot(down.position) ?: down.position
                     var pullingToClose = false
                     var lastFrac = 1f
 
@@ -205,8 +210,9 @@ fun AppDrawerScreen(
                                 break
                             }
 
-                            val delta = change.position - lastPos
-                            lastPos = change.position
+                            val rootPosition = drawerGestureCoordinates?.localToRoot(change.position) ?: change.position
+                            val delta = rootPosition - lastPos
+                            lastPos = rootPosition
                             lastDy = delta.y
                             totalDx += delta.x
                             totalDy += delta.y
