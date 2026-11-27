@@ -146,8 +146,10 @@ fun AppDrawerScreen(
     var resolvedHiddenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
     var resolvedFrozenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
 
-    val listState = rememberLazyListState()
-    val gridState = rememberLazyGridState()
+    // Give each pager tab its own lazy state; never attach one LazyListState/GridState
+    // to multiple pager pages at the same time.
+    val listStates = List(3) { rememberLazyListState() }
+    val gridStates = List(3) { rememberLazyGridState() }
 
     LaunchedEffect(showHiddenVault, settings.hiddenPackages) {
         if (showHiddenVault) {
@@ -209,7 +211,8 @@ fun AppDrawerScreen(
                             totalDx += delta.x
                             totalDy += delta.y
 
-                            val atTop = if (settings.drawerListMode) !listState.canScrollBackward else !gridState.canScrollBackward
+                            val activePage = pagerState.currentPage.coerceIn(0, 2)
+                            val atTop = if (settings.drawerListMode) !listStates[activePage].canScrollBackward else !gridStates[activePage].canScrollBackward
                             if (!isDraggingOut && !pullingToClose && atTop && totalDy > touchSlop * 2f && abs(totalDy) > abs(totalDx) * 1.4f) {
                                 pullingToClose = true
                             }
@@ -481,7 +484,7 @@ fun AppDrawerScreen(
                     } else null
 
                     LazyColumn(
-                        state = listState,
+                        state = listStates[page],
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 16.dp,
@@ -557,7 +560,7 @@ fun AppDrawerScreen(
                     }
                 } else {
                     LazyVerticalGrid(
-                        state = gridState,
+                        state = gridStates[page],
                         columns = GridCells.Fixed(settings.drawerColumns),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
