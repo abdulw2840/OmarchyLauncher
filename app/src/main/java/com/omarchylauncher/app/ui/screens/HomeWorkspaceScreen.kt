@@ -200,6 +200,7 @@ fun HomeWorkspaceScreen(
 
     val totalGridSlots = (settings.gridRows * settings.gridColumns).coerceAtLeast(pinnedSlots.size)
     val localSlots = remember { mutableStateListOf<AppEntry?>() }
+    var gridDragSnapshot by remember { mutableStateOf<List<AppEntry?>?>(null) }
     LaunchedEffect(pinnedSlots, draggingPkg, totalGridSlots) {
         if (draggingPkg == null) {
             localSlots.clear()
@@ -214,6 +215,7 @@ fun HomeWorkspaceScreen(
     var lastDockPointerX by remember { mutableFloatStateOf(0f) }
     var dockSwapCount by remember { mutableIntStateOf(0) }
     val localDock = remember { mutableStateListOf<AppEntry>() }
+    var dockDragSnapshot by remember { mutableStateOf<List<AppEntry>?>(null) }
     LaunchedEffect(dockApps, draggingDockPkg) {
         if (draggingDockPkg == null) {
             localDock.clear()
@@ -590,6 +592,7 @@ fun HomeWorkspaceScreen(
                                                     onShowMenu = { onLongPressApp(app) },
                                                     onDismissMenu = onDismissLongPressApp,
                                                     onDragStart = {
+                                                        gridDragSnapshot = localSlots.toList()
                                                         draggingPkg = app.packageName
                                                         activeDragApp = app
                                                         swapCount = 0
@@ -660,6 +663,17 @@ fun HomeWorkspaceScreen(
                                                         swapCount = 0
                                                     },
                                                     onDragCancel = {
+                                                        draggingPkg = null
+                                                        activeDragApp = null
+                                                        swapCount = 0
+                                                        gridDragSnapshot = null
+                                                    },
+                                                    onDragCancel = {
+                                                        gridDragSnapshot?.let { snapshot ->
+                                                            localSlots.clear()
+                                                            localSlots.addAll(snapshot)
+                                                        }
+                                                        gridDragSnapshot = null
                                                         draggingPkg = null
                                                         activeDragApp = null
                                                         swapCount = 0
@@ -944,6 +958,7 @@ fun HomeWorkspaceScreen(
                                             onShowMenu = { onLongPressApp(app) },
                                             onDismissMenu = onDismissLongPressApp,
                                             onDragStart = {
+                                                dockDragSnapshot = localDock.toList()
                                                 draggingDockPkg = app.packageName
                                                 activeDragApp = app
                                                 dockDragX = 0f
@@ -994,8 +1009,14 @@ fun HomeWorkspaceScreen(
                                                 activeDragApp = null
                                                 dockDragX = 0f
                                                 dockSwapCount = 0
+                                                dockDragSnapshot = null
                                             },
                                             onDragCancel = {
+                                                dockDragSnapshot?.let { snapshot ->
+                                                    localDock.clear()
+                                                    localDock.addAll(snapshot)
+                                                }
+                                                dockDragSnapshot = null
                                                 draggingDockPkg = null
                                                 activeDragApp = null
                                                 dockDragX = 0f
