@@ -270,12 +270,12 @@ fun HomeWorkspaceScreen(
             isAnyDragActive -> 0.88f
             else -> 1f
         },
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
         label = "wsScale"
     )
     val workspaceOffsetYPx by animateFloatAsState(
         targetValue = if (isZoomedOut) with(density) { 46.dp.toPx() } else 0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        animationSpec = spring(dampingRatio = 0.82f, stiffness = Spring.StiffnessMediumLow),
         label = "wsOffsetY"
     )
 
@@ -449,7 +449,22 @@ fun HomeWorkspaceScreen(
                     Modifier
                 }
 
-                Box(modifier = Modifier.fillMaxSize().then(pageDottedModifier)) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        // Keep the page itself on the render thread while the pager moves.
+                        // The subtle scale/alpha response gives adjacent pages a soft,
+                        // physical hand-off without changing the workspace layout.
+                        .graphicsLayer {
+                            val pageOffset = (pagerState.currentPage - page + pagerState.currentPageOffsetFraction)
+                            val distance = kotlin.math.abs(pageOffset).coerceIn(0f, 1f)
+                            scaleX = 1f - 0.035f * distance
+                            scaleY = 1f - 0.05f * distance
+                            translationY = with(density) { 10.dp.toPx() } * distance
+                            alpha = 1f - 0.12f * distance
+                        }
+                        .then(pageDottedModifier)
+                ) {
                     if (page == basePages && isZoomedOut) {
                         // Trailing "+ ADD NEW PAGE" card in zoom-out mode
                         val borderColor = palette.accent
