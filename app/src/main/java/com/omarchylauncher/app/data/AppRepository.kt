@@ -20,6 +20,7 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -87,7 +88,13 @@ class AppRepository(private val context: Context) {
     init {
         scope.launch {
             for (ignored in refreshRequests) {
-                performRefresh()
+                try {
+                    performRefresh()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    android.util.Log.e("AppRepository", "App refresh failed", failure)
+                }
             }
         }
         runCatching { launcherApps.registerCallback(callback) }
