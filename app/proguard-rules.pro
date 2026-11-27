@@ -1,0 +1,5 @@
+-keep class com.locguard.app.IPrivilegedService { *; }
+-keep class com.locguard.app.IPrivilegedService$Stub { *; }
+-keep class com.locguard.app.privilege.ShizukuUserService { *; }
+-keep class rikka.shizuku.** { *; }
+-keep class com.topjohnwu.superuser.** { *; }
