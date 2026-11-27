@@ -148,7 +148,7 @@ class AppRepository(private val context: Context) {
                 .map { info ->
                     val packageName = info.applicationInfo.packageName
                     val isSystem = (info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                    val cacheKey = "${info.user.hashCode()}|$packageName|${info.componentName.className}|${info.applicationInfo.lastUpdateTime}"
+                    val cacheKey = "${info.user.hashCode()}|$packageName|${info.componentName.className}"
                     val cachedIcons = launcherIconCache.get(cacheKey) ?: run {
                         val rawDrawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
                         val icon = runCatching { rawDrawable?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()
