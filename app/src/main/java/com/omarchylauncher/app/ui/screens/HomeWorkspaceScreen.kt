@@ -661,11 +661,6 @@ fun HomeWorkspaceScreen(
                                                         draggingPkg = null
                                                         activeDragApp = null
                                                         swapCount = 0
-                                                    },
-                                                    onDragCancel = {
-                                                        draggingPkg = null
-                                                        activeDragApp = null
-                                                        swapCount = 0
                                                         gridDragSnapshot = null
                                                     },
                                                     onDragCancel = {
