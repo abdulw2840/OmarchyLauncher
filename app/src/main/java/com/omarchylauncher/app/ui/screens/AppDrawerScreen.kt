@@ -148,8 +148,8 @@ fun AppDrawerScreen(
 
     // Give each pager tab its own lazy state; never attach one LazyListState/GridState
     // to multiple pager pages at the same time.
-    val listStates = List(3) { rememberLazyListState() }
-    val gridStates = List(3) { rememberLazyGridState() }
+    val listStates = listOf(rememberLazyListState(), rememberLazyListState(), rememberLazyListState())
+    val gridStates = listOf(rememberLazyGridState(), rememberLazyGridState(), rememberLazyGridState())
 
     LaunchedEffect(showHiddenVault, settings.hiddenPackages) {
         if (showHiddenVault) {
