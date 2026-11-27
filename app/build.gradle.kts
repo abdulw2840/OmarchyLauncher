@@ -6,7 +6,11 @@ plugins {
 
 android {
     namespace = "com.omarchylauncher.app"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 0
+        }
+    }
 
     defaultConfig {
         applicationId = "com.omarchylauncher.app"
