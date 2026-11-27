@@ -27,7 +27,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
@@ -87,6 +89,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.hypot
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -106,9 +109,12 @@ fun HomeWorkspaceScreen(
     onAddWidget: () -> Unit,
     onRemoveWidget: (Int) -> Unit,
     onResizeWidget: (Int, Int) -> Unit,
+    onSetWidgetHalfWidth: (Int, Boolean) -> Unit,
+    onReorderWidgets: (List<Int>) -> Unit,
     onAddPage: () -> Unit,
     onRemovePage: () -> Unit,
     onSavePinnedOrder: (List<String>) -> Unit,
+    onSaveDockOrder: (List<String>) -> Unit,
     onLockScreen: () -> Unit,
     onExpandNotifications: () -> Unit,
     onRefreshWeather: () -> Unit,
@@ -137,6 +143,18 @@ fun HomeWorkspaceScreen(
         if (draggingPkg == null) {
             localPinned.clear()
             localPinned.addAll(pinnedApps)
+        }
+    }
+
+    var draggingDockPkg by remember { mutableStateOf<String?>(null) }
+    var dockDragX by remember { mutableFloatStateOf(0f) }
+    var dockTotalDist by remember { mutableFloatStateOf(0f) }
+    var dockSwapCount by remember { mutableIntStateOf(0) }
+    val localDock = remember { mutableStateListOf<AppEntry>() }
+    LaunchedEffect(dockApps, draggingDockPkg) {
+        if (draggingDockPkg == null) {
+            localDock.clear()
+            localDock.addAll(dockApps)
         }
     }
 
@@ -364,23 +382,27 @@ fun HomeWorkspaceScreen(
                                                             val centerX = currentItem.offset.x + currentItem.size.width / 2f + dragOffset.x
                                                             val centerY = currentItem.offset.y + currentItem.size.height / 2f + dragOffset.y
 
-                                                            val target = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
-                                                                if (item.index == currentIdx || item.index !in localPinned.indices) return@firstOrNull false
-                                                                val mx = item.size.width * 0.20f
-                                                                val my = item.size.height * 0.20f
-                                                                centerX >= item.offset.x + mx &&
-                                                                    centerX <= item.offset.x + item.size.width - mx &&
-                                                                    centerY >= item.offset.y + my &&
-                                                                    centerY <= item.offset.y + item.size.height - my
-                                                            }
-                                                            if (target != null) {
-                                                                val deltaX = (currentItem.offset.x - target.offset.x).toFloat()
-                                                                val deltaY = (currentItem.offset.y - target.offset.y).toFloat()
-                                                                val moved = localPinned.removeAt(currentIdx)
-                                                                localPinned.add(target.index, moved)
-                                                                dragOffset = Offset(dragOffset.x + deltaX, dragOffset.y + deltaY)
-                                                                swapCount++
-                                                                lastSwapTime = now
+                                                            val closest = gridState.layoutInfo.visibleItemsInfo
+                                                                .filter { it.index in localPinned.indices }
+                                                                .minByOrNull { item ->
+                                                                    val ix = item.offset.x + item.size.width / 2f
+                                                                    val iy = item.offset.y + item.size.height / 2f
+                                                                    hypot(centerX - ix, centerY - iy)
+                                                                }
+                                                            if (closest != null && closest.index != currentIdx) {
+                                                                val dist = hypot(
+                                                                    centerX - (closest.offset.x + closest.size.width / 2f),
+                                                                    centerY - (closest.offset.y + closest.size.height / 2f)
+                                                                )
+                                                                if (dist < currentItem.size.width * 0.8f) {
+                                                                    val deltaX = (currentItem.offset.x - closest.offset.x).toFloat()
+                                                                    val deltaY = (currentItem.offset.y - closest.offset.y).toFloat()
+                                                                    val moved = localPinned.removeAt(currentIdx)
+                                                                    localPinned.add(closest.index, moved)
+                                                                    dragOffset = Offset(dragOffset.x + deltaX, dragOffset.y + deltaY)
+                                                                    swapCount++
+                                                                    lastSwapTime = now
+                                                                }
                                                             }
                                                         },
                                                         onDragEnd = {
@@ -420,30 +442,41 @@ fun HomeWorkspaceScreen(
                         }
                     }
                 } else {
-                    // Extra Widget Page(s) — Clean, edge-to-edge resizable widgets
+                    // Extra Widget Page(s) — Omarchy Tiling WM (2-column tiling layout)
                     Column(modifier = Modifier.fillMaxSize()) {
                         val pageWidgets = if (page == 1) settings.widgetIds else emptyList()
                         if (pageWidgets.isNotEmpty()) {
-                            LazyColumn(
+                            LazyVerticalGrid(
+                                columns = GridCells.Fixed(2),
                                 modifier = Modifier.weight(1f).fillMaxWidth(),
-                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                                verticalArrangement = Arrangement.spacedBy(10.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                items(pageWidgets, key = { "widget_$it" }) { widgetId ->
+                                items(
+                                    items = pageWidgets,
+                                    key = { "widget_$it" },
+                                    span = { id ->
+                                        GridItemSpan(if (settings.widgetHalfWidth.contains(id)) 1 else 2)
+                                    }
+                                ) { widgetId ->
                                     val info = remember(widgetId) {
                                         runCatching { appWidgetManager.getAppWidgetInfo(widgetId) }.getOrNull()
                                     }
+                                    val isHalf = settings.widgetHalfWidth.contains(widgetId)
                                     val customHeight = settings.widgetHeights[widgetId]
                                         ?: (info?.minHeight?.coerceIn(48, 260) ?: 100)
 
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .animateItem()
                                             .clip(karuiShape())
                                             .border(1.dp, palette.border, karuiShape())
                                             .combinedClickable(
                                                 onClick = {},
                                                 onLongClick = { widgetToManage = widgetId }
-                                            )
+                                            ),
+                                        contentAlignment = Alignment.Center
                                     ) {
                                         if (info != null) {
                                             AndroidView(
@@ -453,7 +486,10 @@ fun HomeWorkspaceScreen(
                                                     }
                                                 },
                                                 update = { view ->
+                                                    val wDp = if (isHalf) 170 else 360
                                                     val opts = Bundle().apply {
+                                                        putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, wDp)
+                                                        putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, wDp)
                                                         putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, customHeight)
                                                         putInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, customHeight)
                                                     }
@@ -546,7 +582,7 @@ fun HomeWorkspaceScreen(
                 }
             }
 
-            if (settings.showDock && dockApps.isNotEmpty()) {
+            if (settings.showDock && localDock.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     modifier = Modifier
@@ -558,18 +594,78 @@ fun HomeWorkspaceScreen(
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    dockApps.forEach { app ->
-                        KaruiAppTile(
-                            app = app,
-                            showLabel = false,
-                            monochrome = settings.monochromeIcons,
-                            hapticsEnabled = settings.hapticFeedback,
-                            iconShape = settings.iconShape,
-                            iconSize = settings.iconSizeDp.dp,
-                            onClick = { onLaunchApp(app) },
-                            onLongClick = { onLongPressApp(app) },
-                            modifier = Modifier.weight(1f)
-                        )
+                    localDock.forEach { app ->
+                        val isDockDragging = draggingDockPkg == app.packageName
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .zIndex(if (isDockDragging) 10f else 0f)
+                                .graphicsLayer {
+                                    if (isDockDragging) {
+                                        translationX = dockDragX
+                                        scaleX = 1.08f
+                                        scaleY = 1.08f
+                                    }
+                                }
+                                .pointerInput(app.packageName) {
+                                    detectDragGesturesAfterLongPress(
+                                        onDragStart = {
+                                            draggingDockPkg = app.packageName
+                                            dockDragX = 0f
+                                            dockTotalDist = 0f
+                                            dockSwapCount = 0
+                                        },
+                                        onDrag = { change, dragAmount ->
+                                            change.consume()
+                                            dockDragX += dragAmount.x
+                                            dockTotalDist += dragAmount.getDistance()
+                                            val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
+                                            val cellW = size.width.toFloat().coerceAtLeast(1f)
+                                            if (curIdx >= 0) {
+                                                if (dockDragX > cellW * 0.65f && curIdx < localDock.lastIndex) {
+                                                    val item = localDock.removeAt(curIdx)
+                                                    localDock.add(curIdx + 1, item)
+                                                    dockDragX -= cellW
+                                                    dockSwapCount++
+                                                } else if (dockDragX < -cellW * 0.65f && curIdx > 0) {
+                                                    val item = localDock.removeAt(curIdx)
+                                                    localDock.add(curIdx - 1, item)
+                                                    dockDragX += cellW
+                                                    dockSwapCount++
+                                                }
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            if (dockSwapCount == 0 && dockTotalDist < 14f) {
+                                                onLongPressApp(app)
+                                            } else if (dockSwapCount > 0) {
+                                                onSaveDockOrder(localDock.map { it.packageName })
+                                            }
+                                            draggingDockPkg = null
+                                            dockDragX = 0f
+                                            dockTotalDist = 0f
+                                            dockSwapCount = 0
+                                        },
+                                        onDragCancel = {
+                                            draggingDockPkg = null
+                                            dockDragX = 0f
+                                            dockTotalDist = 0f
+                                            dockSwapCount = 0
+                                        }
+                                    )
+                                }
+                        ) {
+                            KaruiAppTile(
+                                app = app,
+                                showLabel = false,
+                                monochrome = settings.monochromeIcons,
+                                hapticsEnabled = settings.hapticFeedback,
+                                iconShape = settings.iconShape,
+                                iconSize = settings.iconSizeDp.dp,
+                                onClick = { onLaunchApp(app) },
+                                onLongClick = null
+                            )
+                        }
                     }
                 }
             }
@@ -624,7 +720,9 @@ fun HomeWorkspaceScreen(
     }
 
     widgetToManage?.let { wId ->
-        val curHeight = settings.widgetHeights[wId] ?: 160
+        val curHeight = settings.widgetHeights[wId] ?: 110
+        val isHalf = settings.widgetHalfWidth.contains(wId)
+        val wIdx = settings.widgetIds.indexOf(wId)
         Dialog(onDismissRequest = { widgetToManage = null }) {
             Column(
                 modifier = Modifier
@@ -635,24 +733,54 @@ fun HomeWorkspaceScreen(
                     .padding(14.dp)
             ) {
                 Text(
-                    text = "WIDGET OPTIONS (${curHeight}dp)",
+                    text = "WIDGET TILING (${curHeight}dp)",
                     color = palette.accent,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = (14 * scale).sp
                 )
                 Spacer(modifier = Modifier.height(10.dp))
-                Text("RESIZE HEIGHT", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("TILE WIDTH", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    KaruiChip("Half (1/2)", isHalf, { onSetWidgetHalfWidth(wId, true) }, Modifier.weight(1f))
+                    KaruiChip("Full (2/2)", !isHalf, { onSetWidgetHalfWidth(wId, false) }, Modifier.weight(1f))
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text("TILE HEIGHT", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf("S" to 64, "M" to 110, "L" to 180, "XL" to 260).forEach { (lbl, h) ->
                         KaruiChip(lbl, curHeight == h, { onResizeWidget(wId, h) }, Modifier.weight(1f))
                     }
                 }
+                if (settings.widgetIds.size > 1 && wIdx >= 0) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("ORDER", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        KaruiSubtleButton("↑ Move Up", {
+                            if (wIdx > 0) {
+                                val list = settings.widgetIds.toMutableList()
+                                val item = list.removeAt(wIdx)
+                                list.add(wIdx - 1, item)
+                                onReorderWidgets(list)
+                            }
+                        }, Modifier.weight(1f))
+                        KaruiSubtleButton("↓ Move Down", {
+                            if (wIdx < settings.widgetIds.lastIndex) {
+                                val list = settings.widgetIds.toMutableList()
+                                val item = list.removeAt(wIdx)
+                                list.add(wIdx + 1, item)
+                                onReorderWidgets(list)
+                            }
+                        }, Modifier.weight(1f))
+                    }
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     KaruiSubtleButton("Close", { widgetToManage = null }, Modifier.weight(1f))
-                    KaruiButton("Remove Widget", {
+                    KaruiButton("Remove", {
                         onRemoveWidget(wId)
                         widgetToManage = null
                     }, Modifier.weight(1f))

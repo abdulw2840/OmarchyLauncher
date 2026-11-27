@@ -267,7 +267,7 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(10.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
-                            ToggleRow("Monochrome Icons", "Grayscale icons inside Karui frames", settings.monochromeIcons, onSetMonochromeIcons)
+                            ToggleRow("Pixel Themed Icons", "Tint adaptive monochrome icons to match active theme", settings.monochromeIcons, onSetMonochromeIcons)
                             Spacer(modifier = Modifier.height(12.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))

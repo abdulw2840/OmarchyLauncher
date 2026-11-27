@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
@@ -70,9 +71,12 @@ fun KaruiAppTile(
     val haptic = LocalHapticFeedback.current
     val frameShape = iconShapeToComposeShape(iconShape)
 
-    val monoFilter = if (monochrome) {
-        ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
-    } else null
+    val themedBitmap = if (monochrome && app.monochromeIcon != null) app.monochromeIcon else app.icon
+    val themedFilter = when {
+        monochrome && app.monochromeIcon != null -> ColorFilter.tint(palette.accent, BlendMode.SrcIn)
+        monochrome -> ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
+        else -> null
+    }
 
     val clickModifier = if (onLongClick != null) {
         Modifier.combinedClickable(
@@ -101,11 +105,11 @@ fun KaruiAppTile(
                 .padding(4.dp),
             contentAlignment = Alignment.Center
         ) {
-            if (app.icon != null) {
+            if (themedBitmap != null) {
                 Image(
-                    bitmap = app.icon,
+                    bitmap = themedBitmap,
                     contentDescription = app.label,
-                    colorFilter = monoFilter,
+                    colorFilter = themedFilter,
                     modifier = Modifier
                         .fillMaxSize()
                         .clip(frameShape)

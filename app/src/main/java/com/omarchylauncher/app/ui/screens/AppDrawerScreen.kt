@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -65,6 +66,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -111,7 +114,10 @@ fun AppDrawerScreen(
     onResolveHiddenApps: suspend (Set<String>) -> List<HiddenAppInfo>,
     onLaunchHiddenApp: (String) -> Unit,
     onUnhideApp: (String) -> Unit,
-    onUnfreezeApp: (String) -> Unit
+    onUnfreezeApp: (String) -> Unit,
+    onDragToHomeStart: (AppEntry, Offset) -> Unit,
+    onDragToHomeMove: (Offset) -> Unit,
+    onDragToHomeEnd: (Boolean) -> Unit
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
@@ -527,16 +533,58 @@ fun AppDrawerScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(pageApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
-                            KaruiAppTile(
-                                app = app,
-                                showLabel = settings.showDrawerLabels,
-                                monochrome = settings.monochromeIcons,
-                                hapticsEnabled = settings.hapticFeedback,
-                                iconShape = settings.iconShape,
-                                iconSize = settings.iconSizeDp.dp,
-                                onClick = { onLaunchApp(app) },
-                                onLongClick = { onLongPressApp(app) }
-                            )
+                            var itemRootPos by remember { mutableStateOf(Offset.Zero) }
+                            var dragStarted by remember { mutableStateOf(false) }
+                            var totalDist by remember { mutableStateOf(0f) }
+
+                            Box(
+                                modifier = Modifier
+                                    .onGloballyPositioned { coords ->
+                                        itemRootPos = coords.positionInRoot()
+                                    }
+                                    .pointerInput(app.packageName) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { offset ->
+                                                dragStarted = false
+                                                totalDist = 0f
+                                                if (settings.hapticFeedback) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                totalDist += dragAmount.getDistance()
+                                                if (!dragStarted && totalDist > 26f) {
+                                                    dragStarted = true
+                                                    onDragToHomeStart(app, itemRootPos + change.position)
+                                                } else if (dragStarted) {
+                                                    onDragToHomeMove(dragAmount)
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                if (!dragStarted && totalDist < 20f) {
+                                                    onLongPressApp(app)
+                                                } else if (dragStarted) {
+                                                    onDragToHomeEnd(true)
+                                                }
+                                                dragStarted = false
+                                            },
+                                            onDragCancel = {
+                                                if (dragStarted) onDragToHomeEnd(false)
+                                                dragStarted = false
+                                            }
+                                        )
+                                    }
+                            ) {
+                                KaruiAppTile(
+                                    app = app,
+                                    showLabel = settings.showDrawerLabels,
+                                    monochrome = settings.monochromeIcons,
+                                    hapticsEnabled = settings.hapticFeedback,
+                                    iconShape = settings.iconShape,
+                                    iconSize = settings.iconSizeDp.dp,
+                                    onClick = { onLaunchApp(app) },
+                                    onLongClick = null
+                                )
+                            }
                         }
                     }
                 }

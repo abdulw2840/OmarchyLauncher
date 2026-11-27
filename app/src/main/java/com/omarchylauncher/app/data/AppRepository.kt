@@ -7,7 +7,9 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
 import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
+import android.graphics.drawable.AdaptiveIconDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Process
 import android.os.UserHandle
 import android.provider.Settings
@@ -28,7 +30,8 @@ data class AppEntry(
     val label: String,
     val isSystem: Boolean,
     val userHandle: UserHandle,
-    val icon: ImageBitmap?
+    val icon: ImageBitmap?,
+    val monochromeIcon: ImageBitmap? = null
 ) {
     val componentName: ComponentName get() = ComponentName(packageName, activityName)
 }
@@ -75,16 +78,24 @@ class AppRepository(private val context: Context) {
                 .filter { it.applicationInfo.packageName != myPkg }
                 .map { info ->
                     val isSystem = (info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    val rawDrawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
                     val icon = runCatching {
-                        info.getBadgedIcon(0).toBitmap(96, 96).asImageBitmap()
+                        rawDrawable?.toBitmap(96, 96)?.asImageBitmap()
                     }.getOrNull()
+                    val monoIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        runCatching {
+                            val adaptive = rawDrawable as? AdaptiveIconDrawable
+                            adaptive?.monochrome?.toBitmap(96, 96)?.asImageBitmap()
+                        }.getOrNull()
+                    } else null
                     AppEntry(
                         packageName = info.applicationInfo.packageName,
                         activityName = info.componentName.className,
                         label = info.label?.toString() ?: info.applicationInfo.packageName,
                         isSystem = isSystem,
                         userHandle = info.user,
-                        icon = icon
+                        icon = icon,
+                        monochromeIcon = monoIcon
                     )
                 }
                 .distinctBy { "${it.packageName}/${it.activityName}" }

@@ -66,7 +66,8 @@ data class LauncherSettings(
     val hiddenPackages: Set<String> = emptySet(),
     val frozenPackages: Set<String> = emptySet(),
     val widgetIds: List<Int> = emptyList(),
-    val widgetHeights: Map<Int, Int> = emptyMap()
+    val widgetHeights: Map<Int, Int> = emptyMap(),
+    val widgetHalfWidth: Set<Int> = emptySet()
 )
 
 class LauncherPreferences(private val context: Context) {
@@ -110,6 +111,7 @@ class LauncherPreferences(private val context: Context) {
         val FROZEN_PKGS = stringSetPreferencesKey("frozen_pkgs")
         val WIDGET_IDS = stringPreferencesKey("widget_ids_csv")
         val WIDGET_HEIGHTS = stringPreferencesKey("widget_heights_csv")
+        val WIDGET_HALF_WIDTH = stringSetPreferencesKey("widget_half_width")
     }
 
     val settingsFlow: Flow<LauncherSettings> = context.dataStore.data.map { p ->
@@ -159,7 +161,8 @@ class LauncherPreferences(private val context: Context) {
             hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet(),
             frozenPackages = p[Keys.FROZEN_PKGS] ?: emptySet(),
             widgetIds = parseIntCsv(p[Keys.WIDGET_IDS]),
-            widgetHeights = parseIntMap(p[Keys.WIDGET_HEIGHTS])
+            widgetHeights = parseIntMap(p[Keys.WIDGET_HEIGHTS]),
+            widgetHalfWidth = (p[Keys.WIDGET_HALF_WIDTH] ?: emptySet()).mapNotNull { it.toIntOrNull() }.toSet()
         )
     }
 
@@ -239,6 +242,45 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setPinnedHomePackages(pkgs: List<String>) {
         context.dataStore.edit { p ->
             p[Keys.PINNED_HOME] = pkgs.distinct().joinToString(",")
+        }
+    }
+
+    suspend fun setDockPackages(pkgs: List<String>) {
+        context.dataStore.edit { p ->
+            p[Keys.DOCK_PKGS] = pkgs.distinct().take(6).joinToString(",")
+        }
+    }
+
+    suspend fun addPinnedHomeAt(pkg: String, index: Int? = null) {
+        context.dataStore.edit { p ->
+            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
+            list.remove(pkg)
+            if (index != null && index in 0..list.size) list.add(index, pkg) else list.add(pkg)
+            p[Keys.PINNED_HOME] = list.joinToString(",")
+        }
+    }
+
+    suspend fun addDockPackage(pkg: String) {
+        context.dataStore.edit { p ->
+            val list = parseCsv(p[Keys.DOCK_PKGS]).toMutableList()
+            if (!list.contains(pkg) && list.size < 6) {
+                list.add(pkg)
+                p[Keys.DOCK_PKGS] = list.joinToString(",")
+            }
+        }
+    }
+
+    suspend fun setWidgetHalfWidth(widgetId: Int, half: Boolean) {
+        context.dataStore.edit { p ->
+            val set = (p[Keys.WIDGET_HALF_WIDTH] ?: emptySet()).toMutableSet()
+            if (half) set.add(widgetId.toString()) else set.remove(widgetId.toString())
+            p[Keys.WIDGET_HALF_WIDTH] = set
+        }
+    }
+
+    suspend fun setWidgetOrder(ids: List<Int>) {
+        context.dataStore.edit { p ->
+            p[Keys.WIDGET_IDS] = ids.distinct().joinToString(",")
         }
     }
 

@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
@@ -49,9 +50,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -65,6 +70,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.omarchylauncher.app.data.AppEntry
 import com.omarchylauncher.app.ui.LauncherViewModel
 import com.omarchylauncher.app.ui.components.KaruiAppContextDialog
+import com.omarchylauncher.app.ui.components.KaruiAppTile
 import com.omarchylauncher.app.ui.components.KaruiButton
 import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
@@ -173,6 +179,8 @@ class MainActivity : ComponentActivity() {
             var contextApp by remember { mutableStateOf<AppEntry?>(null) }
             var pendingHidePkgForPin by remember { mutableStateOf<String?>(null) }
             var showWidgetPicker by remember { mutableStateOf(false) }
+            var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
+            var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
 
             LaunchedEffect(homeResetSignal) {
                 if (homeResetSignal > 0) drawerOpen = false
@@ -225,9 +233,12 @@ class MainActivity : ComponentActivity() {
                             viewModel.removeWidgetId(id)
                         },
                         onResizeWidget = viewModel::setWidgetHeight,
+                        onSetWidgetHalfWidth = viewModel::setWidgetHalfWidth,
+                        onReorderWidgets = viewModel::setWidgetOrder,
                         onAddPage = { viewModel.setExtraPagesCount(settings.extraPagesCount + 1) },
                         onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
                         onSavePinnedOrder = viewModel::setPinnedHomePackages,
+                        onSaveDockOrder = viewModel::setDockPackages,
                         onLockScreen = viewModel::lockScreen,
                         onExpandNotifications = viewModel::expandNotifications,
                         onRefreshWeather = { viewModel.refreshWeather(silent = false) },
@@ -236,10 +247,16 @@ class MainActivity : ComponentActivity() {
                         onLongPressApp = { contextApp = it }
                     )
 
+                    val density = LocalDensity.current
+                    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+
                     AnimatedVisibility(
                         visible = drawerOpen,
                         enter = slideInVertically(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) { it / 4 } + fadeIn(tween(180)),
-                        exit = slideOutVertically(tween(170)) { it / 4 } + fadeOut(tween(140))
+                        exit = slideOutVertically(tween(170)) { it / 4 } + fadeOut(tween(140)),
+                        modifier = Modifier.graphicsLayer {
+                            alpha = if (draggingDrawerApp != null) 0f else 1f
+                        }
                     ) {
                         AppDrawerScreen(
                             apps = apps,
@@ -264,8 +281,49 @@ class MainActivity : ComponentActivity() {
                                 viewModel.launchHiddenApp(pkg)
                             },
                             onUnhideApp = viewModel::toggleHiddenPackage,
-                            onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) }
+                            onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) },
+                            onDragToHomeStart = { app, pos ->
+                                draggingDrawerApp = app
+                                draggingDrawerPos = pos
+                            },
+                            onDragToHomeMove = { delta ->
+                                draggingDrawerPos += delta
+                            },
+                            onDragToHomeEnd = { commit ->
+                                val dropped = draggingDrawerApp
+                                val dropY = draggingDrawerPos.y
+                                draggingDrawerApp = null
+                                if (commit && dropped != null) {
+                                    drawerOpen = false
+                                    if (settings.showDock && dropY >= screenHeightPx * 0.80f) {
+                                        viewModel.addDockPackage(dropped.packageName)
+                                    } else {
+                                        viewModel.addPinnedHomeAt(dropped.packageName)
+                                    }
+                                }
+                            }
                         )
+                    }
+
+                    draggingDrawerApp?.let { dragged ->
+                        val offsetX = with(density) { (draggingDrawerPos.x - 36.dp.toPx()).toDp() }
+                        val offsetY = with(density) { (draggingDrawerPos.y - 36.dp.toPx()).toDp() }
+                        Box(
+                            modifier = Modifier
+                                .offset(x = offsetX, y = offsetY)
+                                .graphicsLayer { scaleX = 1.12f; scaleY = 1.12f }
+                        ) {
+                            KaruiAppTile(
+                                app = dragged,
+                                showLabel = false,
+                                monochrome = settings.monochromeIcons,
+                                hapticsEnabled = false,
+                                iconShape = settings.iconShape,
+                                iconSize = settings.iconSizeDp.dp,
+                                onClick = {},
+                                onLongClick = null
+                            )
+                        }
                     }
 
                     contextApp?.let { target ->

@@ -419,7 +419,12 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setDrawerBgAlpha(v: Float) = viewModelScope.launch { app.preferences.setDrawerBgAlpha(v) }
     fun reorderPinnedHome(fromIndex: Int, toIndex: Int) = viewModelScope.launch { app.preferences.reorderPinnedHome(fromIndex, toIndex) }
     fun setPinnedHomePackages(pkgs: List<String>) = viewModelScope.launch { app.preferences.setPinnedHomePackages(pkgs) }
+    fun setDockPackages(pkgs: List<String>) = viewModelScope.launch { app.preferences.setDockPackages(pkgs) }
+    fun addPinnedHomeAt(pkg: String, index: Int? = null) = viewModelScope.launch { app.preferences.addPinnedHomeAt(pkg, index) }
+    fun addDockPackage(pkg: String) = viewModelScope.launch { app.preferences.addDockPackage(pkg) }
     fun setWidgetHeight(widgetId: Int, heightDp: Int) = viewModelScope.launch { app.preferences.setWidgetHeight(widgetId, heightDp) }
+    fun setWidgetHalfWidth(widgetId: Int, half: Boolean) = viewModelScope.launch { app.preferences.setWidgetHalfWidth(widgetId, half) }
+    fun setWidgetOrder(ids: List<Int>) = viewModelScope.launch { app.preferences.setWidgetOrder(ids) }
     fun setSolidBackground(v: Boolean) = viewModelScope.launch { app.preferences.setSolidBackground(v) }
     fun setWallpaperDimAlpha(v: Float) = viewModelScope.launch { app.preferences.setWallpaperDimAlpha(v) }
     fun setGridColumns(v: Int) = viewModelScope.launch { app.preferences.setGridColumns(v) }
