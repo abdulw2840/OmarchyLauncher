@@ -110,7 +110,7 @@ class AppRepository(private val context: Context) {
         val marker = "|$packageName|"
         launcherIconCache.snapshot().keys
             .filter { it.contains(marker) }
-            .forEach(launcherIconCache::remove)
+            .forEach { key -> launcherIconCache.remove(key) }
     }
 
     init {
