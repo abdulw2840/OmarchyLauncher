@@ -13,6 +13,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -216,8 +218,10 @@ class MainActivity : ComponentActivity() {
                             appWidgetHost.deleteAppWidgetId(id)
                             viewModel.removeWidgetId(id)
                         },
+                        onResizeWidget = viewModel::setWidgetHeight,
                         onAddPage = { viewModel.setExtraPagesCount(settings.extraPagesCount + 1) },
                         onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
+                        onReorderPinnedHome = viewModel::reorderPinnedHome,
                         onLockScreen = viewModel::lockScreen,
                         onExpandNotifications = viewModel::expandNotifications,
                         onRefreshWeather = { viewModel.refreshWeather(silent = false) },
@@ -228,8 +232,8 @@ class MainActivity : ComponentActivity() {
 
                     AnimatedVisibility(
                         visible = drawerOpen,
-                        enter = slideInVertically(tween(180)) { it / 3 } + fadeIn(tween(150)),
-                        exit = slideOutVertically(tween(150)) { it / 3 } + fadeOut(tween(120))
+                        enter = slideInVertically(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) { it / 4 } + fadeIn(tween(180)),
+                        exit = slideOutVertically(tween(170)) { it / 4 } + fadeOut(tween(140))
                     ) {
                         AppDrawerScreen(
                             apps = apps,
@@ -285,9 +289,7 @@ class MainActivity : ComponentActivity() {
                             onOpenInfo = { viewModel.openAppInfo(target) },
                             onForceStop = { viewModel.forceStopApp(target.packageName) },
                             onFreeze = { viewModel.freezeApp(target.packageName, true) },
-                            onUninstall = { useRoot -> viewModel.uninstallApp(target.packageName, useRoot) },
-                            onMoveLeft = { viewModel.movePinnedHome(target.packageName, -1) },
-                            onMoveRight = { viewModel.movePinnedHome(target.packageName, 1) }
+                            onUninstall = { useRoot -> viewModel.uninstallApp(target.packageName, useRoot) }
                         )
                     }
 

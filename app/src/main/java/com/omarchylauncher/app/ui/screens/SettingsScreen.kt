@@ -82,6 +82,7 @@ fun SettingsScreen(
     onSetShowScreenTime: (Boolean) -> Unit,
     onSetDrawerColumns: (Int) -> Unit,
     onSetDrawerListMode: (Boolean) -> Unit,
+    onSetDrawerBgAlpha: (Float) -> Unit,
     onSetShowDrawerLabels: (Boolean) -> Unit,
     onSetAutoFocusSearch: (Boolean) -> Unit,
     onSetWebSearchProvider: (WebSearchProvider) -> Unit,
@@ -301,6 +302,20 @@ fun SettingsScreen(
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
                             ToggleRow("Auto-Focus Search on Swipe Up", "Immediately open keyboard like Rofi/Walker", settings.autoFocusDrawerSearch, onSetAutoFocusSearch)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("DRAWER BACKGROUND OPACITY (${(settings.drawerBgAlpha * 100).toInt()}%)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Slider(
+                                value = settings.drawerBgAlpha,
+                                onValueChange = onSetDrawerBgAlpha,
+                                valueRange = 0.4f..1.0f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = palette.accent,
+                                    activeTrackColor = palette.accent,
+                                    inactiveTrackColor = palette.surface
+                                )
+                            )
                             Spacer(modifier = Modifier.height(12.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))

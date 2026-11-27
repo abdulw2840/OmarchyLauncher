@@ -71,6 +71,7 @@ class SettingsActivity : ComponentActivity() {
                     onSetShowScreenTime = viewModel::setShowScreenTime,
                     onSetDrawerColumns = viewModel::setDrawerColumns,
                     onSetDrawerListMode = viewModel::setDrawerListMode,
+                    onSetDrawerBgAlpha = viewModel::setDrawerBgAlpha,
                     onSetShowDrawerLabels = viewModel::setShowDrawerLabels,
                     onSetAutoFocusSearch = viewModel::setAutoFocusDrawerSearch,
                     onSetWebSearchProvider = viewModel::setWebSearchProvider,

@@ -413,7 +413,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setUiScale(v: Float) = viewModelScope.launch { app.preferences.setUiScale(v) }
     fun setCornerRadiusDp(v: Int) = viewModelScope.launch { app.preferences.setCornerRadiusDp(v) }
     fun setIconSizeDp(v: Int) = viewModelScope.launch { app.preferences.setIconSizeDp(v) }
-    fun movePinnedHome(pkg: String, delta: Int) = viewModelScope.launch { app.preferences.movePinnedHome(pkg, delta) }
+    fun setDrawerBgAlpha(v: Float) = viewModelScope.launch { app.preferences.setDrawerBgAlpha(v) }
+    fun reorderPinnedHome(fromIndex: Int, toIndex: Int) = viewModelScope.launch { app.preferences.reorderPinnedHome(fromIndex, toIndex) }
+    fun setWidgetHeight(widgetId: Int, heightDp: Int) = viewModelScope.launch { app.preferences.setWidgetHeight(widgetId, heightDp) }
     fun setSolidBackground(v: Boolean) = viewModelScope.launch { app.preferences.setSolidBackground(v) }
     fun setWallpaperDimAlpha(v: Float) = viewModelScope.launch { app.preferences.setWallpaperDimAlpha(v) }
     fun setGridColumns(v: Int) = viewModelScope.launch { app.preferences.setGridColumns(v) }

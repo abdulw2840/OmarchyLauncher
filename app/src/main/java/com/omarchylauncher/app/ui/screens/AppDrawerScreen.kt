@@ -151,7 +151,7 @@ fun AppDrawerScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(palette.bg)
+            .background(palette.bg.copy(alpha = settings.drawerBgAlpha))
             .pointerInput(settings.drawerListMode) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -212,8 +212,9 @@ fun AppDrawerScreen(
                 Box(
                     modifier = Modifier
                         .size(34.dp)
+                        .clip(karuiShape())
                         .background(palette.surface)
-                        .border(2.dp, palette.border, RectangleShape)
+                        .border(2.dp, palette.border, karuiShape())
                         .clickable { onToggleListMode(!settings.drawerListMode) },
                     contentAlignment = Alignment.Center
                 ) {
@@ -227,8 +228,9 @@ fun AppDrawerScreen(
                 Box(
                     modifier = Modifier
                         .size(34.dp)
+                        .clip(karuiShape())
                         .background(palette.surface)
-                        .border(2.dp, palette.border, RectangleShape)
+                        .border(2.dp, palette.border, karuiShape())
                         .clickable { onClose() },
                     contentAlignment = Alignment.Center
                 ) {
@@ -247,8 +249,9 @@ fun AppDrawerScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
+                .clip(karuiShape())
                 .background(palette.surface)
-                .border(2.dp, palette.border, RectangleShape)
+                .border(2.dp, palette.border, karuiShape())
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -318,8 +321,9 @@ fun AppDrawerScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .clip(karuiShape())
                     .background(palette.surface)
-                    .border(2.dp, palette.accent, RectangleShape)
+                    .border(2.dp, palette.accent, karuiShape())
                     .padding(12.dp)
             ) {
                 Text(

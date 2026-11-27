@@ -38,6 +38,7 @@ data class LauncherSettings(
     val gridRows: Int = 5,
     val drawerColumns: Int = 4,
     val drawerListMode: Boolean = false,
+    val drawerBgAlpha: Float = 0.96f,
     val showAtAGlance: Boolean = true,
     val showSearchBar: Boolean = true,
     val showDock: Boolean = true,
@@ -63,7 +64,8 @@ data class LauncherSettings(
     val pinnedHomePackages: List<String> = emptyList(),
     val dockPackages: List<String> = emptyList(),
     val hiddenPackages: Set<String> = emptySet(),
-    val widgetIds: List<Int> = emptyList()
+    val widgetIds: List<Int> = emptyList(),
+    val widgetHeights: Map<Int, Int> = emptyMap()
 )
 
 class LauncherPreferences(private val context: Context) {
@@ -78,6 +80,7 @@ class LauncherPreferences(private val context: Context) {
         val GRID_ROWS = intPreferencesKey("grid_rows")
         val DRAWER_COLS = intPreferencesKey("drawer_cols")
         val DRAWER_LIST_MODE = booleanPreferencesKey("drawer_list_mode")
+        val DRAWER_BG_ALPHA = floatPreferencesKey("drawer_bg_alpha")
         val SHOW_AT_A_GLANCE = booleanPreferencesKey("show_at_a_glance")
         val SHOW_SEARCH_BAR = booleanPreferencesKey("show_search_bar")
         val SHOW_DOCK = booleanPreferencesKey("show_dock")
@@ -104,6 +107,7 @@ class LauncherPreferences(private val context: Context) {
         val DOCK_PKGS = stringPreferencesKey("dock_pkgs_csv")
         val HIDDEN_PKGS = stringSetPreferencesKey("hidden_pkgs")
         val WIDGET_IDS = stringPreferencesKey("widget_ids_csv")
+        val WIDGET_HEIGHTS = stringPreferencesKey("widget_heights_csv")
     }
 
     val settingsFlow: Flow<LauncherSettings> = context.dataStore.data.map { p ->
@@ -125,6 +129,7 @@ class LauncherPreferences(private val context: Context) {
             gridRows = (p[Keys.GRID_ROWS] ?: 5).coerceIn(4, 7),
             drawerColumns = (p[Keys.DRAWER_COLS] ?: 4).coerceIn(3, 6),
             drawerListMode = p[Keys.DRAWER_LIST_MODE] ?: false,
+            drawerBgAlpha = (p[Keys.DRAWER_BG_ALPHA] ?: 0.96f).coerceIn(0.4f, 1.0f),
             showAtAGlance = p[Keys.SHOW_AT_A_GLANCE] ?: true,
             showSearchBar = p[Keys.SHOW_SEARCH_BAR] ?: true,
             showDock = p[Keys.SHOW_DOCK] ?: true,
@@ -150,8 +155,19 @@ class LauncherPreferences(private val context: Context) {
             pinnedHomePackages = parseCsv(p[Keys.PINNED_HOME]),
             dockPackages = parseCsv(p[Keys.DOCK_PKGS]),
             hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet(),
-            widgetIds = parseIntCsv(p[Keys.WIDGET_IDS])
+            widgetIds = parseIntCsv(p[Keys.WIDGET_IDS]),
+            widgetHeights = parseIntMap(p[Keys.WIDGET_HEIGHTS])
         )
+    }
+
+    private fun parseIntMap(raw: String?): Map<Int, Int> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return raw.split(",").mapNotNull { entry ->
+            val parts = entry.split(":")
+            val k = parts.getOrNull(0)?.toIntOrNull()
+            val v = parts.getOrNull(1)?.toIntOrNull()
+            if (k != null && v != null) k to v else null
+        }.toMap()
     }
 
     private fun parseCsv(raw: String?): List<String> =
@@ -170,6 +186,7 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setGridRows(value: Int) = context.dataStore.edit { it[Keys.GRID_ROWS] = value.coerceIn(4, 7) }
     suspend fun setDrawerColumns(value: Int) = context.dataStore.edit { it[Keys.DRAWER_COLS] = value.coerceIn(3, 6) }
     suspend fun setDrawerListMode(value: Boolean) = context.dataStore.edit { it[Keys.DRAWER_LIST_MODE] = value }
+    suspend fun setDrawerBgAlpha(value: Float) = context.dataStore.edit { it[Keys.DRAWER_BG_ALPHA] = value.coerceIn(0.4f, 1.0f) }
     suspend fun setShowAtAGlance(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_AT_A_GLANCE] = value }
     suspend fun setShowSearchBar(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_SEARCH_BAR] = value }
     suspend fun setShowDock(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_DOCK] = value }
@@ -205,18 +222,22 @@ class LauncherPreferences(private val context: Context) {
         }
     }
 
-    suspend fun movePinnedHome(pkg: String, delta: Int) {
+    suspend fun reorderPinnedHome(fromIndex: Int, toIndex: Int) {
         context.dataStore.edit { p ->
             val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
-            val idx = list.indexOf(pkg)
-            if (idx >= 0) {
-                val target = (idx + delta).coerceIn(0, list.lastIndex)
-                if (target != idx) {
-                    val item = list.removeAt(idx)
-                    list.add(target, item)
-                    p[Keys.PINNED_HOME] = list.joinToString(",")
-                }
+            if (fromIndex in list.indices && toIndex in list.indices && fromIndex != toIndex) {
+                val item = list.removeAt(fromIndex)
+                list.add(toIndex, item)
+                p[Keys.PINNED_HOME] = list.joinToString(",")
             }
+        }
+    }
+
+    suspend fun setWidgetHeight(widgetId: Int, heightDp: Int) {
+        context.dataStore.edit { p ->
+            val map = parseIntMap(p[Keys.WIDGET_HEIGHTS]).toMutableMap()
+            map[widgetId] = heightDp.coerceIn(80, 480)
+            p[Keys.WIDGET_HEIGHTS] = map.entries.joinToString(",") { "${it.key}:${it.value}" }
         }
     }
 
