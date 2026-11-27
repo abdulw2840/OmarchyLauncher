@@ -199,7 +199,7 @@ fun AppDrawerScreen(
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
                                 if (pullingToClose) {
-                                    val keepOpen = lastDy <= 4f && lastFrac > 0.72f
+                                    val keepOpen = lastFrac > 0.5f
                                     onCloseDragSettle(keepOpen)
                                 }
                                 break
