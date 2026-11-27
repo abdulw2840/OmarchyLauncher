@@ -205,7 +205,7 @@ class MainActivity : ComponentActivity() {
             var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
             var latestRootPointer by remember { mutableStateOf(Offset.Zero) }
             var dockTopY by remember { mutableStateOf(Float.MAX_VALUE) }
-            var homeDropSlotResolver by remember { mutableStateOf<(Offset) -> Int?> { { null } } }
+            var homeDropSlotResolver by remember { mutableStateOf<(Offset) -> Int?>({ null }) }
 
             fun setDrawerOpenAnimated(open: Boolean, focusSearch: Boolean = false) {
                 focusDrawerSearch = if (open) focusSearch else false
@@ -446,7 +446,7 @@ class MainActivity : ComponentActivity() {
                             isRootAvailable = privilegeStatus.isRootAvailable,
                             onDismiss = { contextApp = null },
                             onLaunchShortcut = {
-                                drawerOpen = false
+                                setDrawerOpenAnimated(false)
                                 viewModel.launchShortcut(it)
                             },
                             onTogglePinHome = { viewModel.togglePinnedHome(target.packageName) },
