@@ -68,7 +68,7 @@ class AppRepository(private val context: Context) {
     private val iconCache = android.util.LruCache<String, ImageBitmap>(256)
     private val iconMonoCache = android.util.LruCache<String, Boolean>(256)
     // Reuse decoded launcher icons across refreshes; the key changes when an app is updated.
-    private val launcherIconCache = android.util.LruCache<String, CachedLauncherIcons>(192)
+    private val launcherIconCache = android.util.LruCache<String, CachedLauncherIcons>(128)
 
     private val _apps = MutableStateFlow<List<AppEntry>>(emptyList())
     val apps: StateFlow<List<AppEntry>> = _apps.asStateFlow()
