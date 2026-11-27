@@ -178,7 +178,7 @@ fun HomeWorkspaceScreen(
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
     val topDropLimitPx = with(density) { (contentPadding.calculateTopPadding() + 86.dp).toPx() }
     var homeOverlayCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-    var latestPointerInOverlay by remember { mutableStateOf(Offset.Zero) }
+    val latestPointerInOverlay = remember { java.util.concurrent.atomic.AtomicReference(Offset.Zero) }
     var gridCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var dockTopY by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var dockLeftX by remember { mutableFloatStateOf(0f) }
@@ -364,11 +364,11 @@ fun HomeWorkspaceScreen(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                    latestPointerInOverlay = down.position
+                    latestPointerInOverlay.set(down.position)
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         val ch = event.changes.firstOrNull { it.id == down.id } ?: break
-                        latestPointerInOverlay = ch.position
+                        latestPointerInOverlay.set(ch.position)
                         if (!ch.pressed) break
                     }
                 }
@@ -598,7 +598,7 @@ fun HomeWorkspaceScreen(
                                                         swapCount = 0
                                                         lastSwapTime = 0L
                                                         activeDragIsSystem = app.isSystem
-                                                        activeDragOverlayPos = latestPointerInOverlay
+                                                        activeDragOverlayPos = latestPointerInOverlay.get()
                                                     },
                                                     onDrag = {
                                                         activeDragOverlayPos = latestPointerInOverlay
@@ -609,7 +609,7 @@ fun HomeWorkspaceScreen(
                                                         val now = System.currentTimeMillis()
                                                         if (now - lastSwapTime < 110L) return@karuiAppHoldOrDrag
 
-                                                        val rootPos = hCoords.localToRoot(latestPointerInOverlay)
+                                                        val rootPos = hCoords.localToRoot(latestPointerInOverlay.get())
                                                         val localInGrid = gCoords.windowToLocal(rootPos)
                                                         val visible = gridState.layoutInfo.visibleItemsInfo
                                                         val closest = visible
@@ -962,15 +962,15 @@ fun HomeWorkspaceScreen(
                                                 draggingDockPkg = app.packageName
                                                 activeDragApp = app
                                                 dockDragX = 0f
-                                                lastDockPointerX = latestPointerInOverlay.x
+                                                lastDockPointerX = latestPointerInOverlay.get().x
                                                 dockSwapCount = 0
                                                 activeDragIsSystem = app.isSystem
                                                 activeDragOverlayPos = latestPointerInOverlay
                                             },
                                             onDrag = {
                                                 activeDragOverlayPos = latestPointerInOverlay
-                                                dockDragX += (latestPointerInOverlay.x - lastDockPointerX)
-                                                lastDockPointerX = latestPointerInOverlay.x
+                                                dockDragX += (latestPointerInOverlay.get().x - lastDockPointerX)
+                                                lastDockPointerX = latestPointerInOverlay.get().x
                                                 val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
                                                 val cellW = (dockItemCoords?.size?.width?.toFloat() ?: 120f).coerceAtLeast(1f)
                                                 if (curIdx >= 0) {
