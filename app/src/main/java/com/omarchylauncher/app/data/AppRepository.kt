@@ -96,11 +96,11 @@ class AppRepository(private val context: Context) {
             refresh()
         }
         override fun onPackagesAvailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) {
-            packageNames?.forEach(::invalidateLauncherIconCache)
+            packageNames?.forEach { packageName -> invalidateLauncherIconCache(packageName) }
             refresh()
         }
         override fun onPackagesUnavailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) {
-            packageNames?.forEach(::invalidateLauncherIconCache)
+            packageNames?.forEach { packageName -> invalidateLauncherIconCache(packageName) }
             refresh()
         }
     }
