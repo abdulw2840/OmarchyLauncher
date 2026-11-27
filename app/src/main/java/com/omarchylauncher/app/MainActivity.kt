@@ -221,7 +221,7 @@ class MainActivity : ComponentActivity() {
                     drawerDragProgress = -1f
                     drawerProgress.animateTo(
                         targetValue = if (open) 1f else 0f,
-                        animationSpec = spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessMediumLow)
+                        animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
                     )
                     if (!open) drawerVisible = false
                 }
@@ -368,8 +368,13 @@ class MainActivity : ComponentActivity() {
                                 .fillMaxSize()
                                 .graphicsLayer {
                                     val p = (if (drawerDragProgress >= 0f) drawerDragProgress else drawerProgress.value).coerceIn(0f, 1f)
-                                    translationY = (1f - p) * screenHeightPx * 0.42f
-                                    alpha = if (draggingDrawerApp != null) 0f else (p * 1.15f).coerceIn(0f, 1f)
+                                    // The drawer grows into place with a restrained spring,
+                                    // rather than appearing as a rigid translated sheet.
+                                    val easedProgress = p.coerceIn(0f, 1f)
+                                    scaleX = 0.975f + 0.025f * easedProgress
+                                    scaleY = 0.985f + 0.015f * easedProgress
+                                    translationY = (1f - easedProgress) * screenHeightPx * 0.42f
+                                    alpha = if (draggingDrawerApp != null) 0f else (easedProgress * 1.15f).coerceIn(0f, 1f)
                                 }
                         ) {
                             AppDrawerScreen(
