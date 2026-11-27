@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material3.Icon
@@ -24,9 +26,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
@@ -38,8 +42,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.omarchylauncher.app.data.AppEntry
+import com.omarchylauncher.app.data.IconShape
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
+
+fun iconShapeToComposeShape(iconShape: IconShape): Shape = when (iconShape) {
+    IconShape.SQUARE -> RectangleShape
+    IconShape.CIRCLE -> CircleShape
+    IconShape.IOS -> RoundedCornerShape(percent = 24)
+    IconShape.ONEUI -> RoundedCornerShape(percent = 36)
+}
 
 @Composable
 fun KaruiAppTile(
@@ -47,6 +59,7 @@ fun KaruiAppTile(
     showLabel: Boolean,
     monochrome: Boolean,
     hapticsEnabled: Boolean,
+    iconShape: IconShape = IconShape.SQUARE,
     iconSize: Dp = 44.dp,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -55,6 +68,7 @@ fun KaruiAppTile(
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
     val haptic = LocalHapticFeedback.current
+    val frameShape = iconShapeToComposeShape(iconShape)
 
     val monoFilter = if (monochrome) {
         ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
@@ -75,8 +89,9 @@ fun KaruiAppTile(
         Box(
             modifier = Modifier
                 .size(iconSize * scale)
+                .clip(frameShape)
                 .background(palette.surface)
-                .border(2.dp, palette.border, RectangleShape)
+                .border(2.dp, palette.border, frameShape)
                 .padding(4.dp),
             contentAlignment = Alignment.Center
         ) {
@@ -85,7 +100,9 @@ fun KaruiAppTile(
                     bitmap = app.icon,
                     contentDescription = app.label,
                     colorFilter = monoFilter,
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(frameShape)
                 )
             } else {
                 Icon(

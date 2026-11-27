@@ -1,11 +1,15 @@
 package com.omarchylauncher.app
 
+import android.app.Activity
+import android.appwidget.AppWidgetHost
+import android.appwidget.AppWidgetManager
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -40,9 +44,56 @@ class MainActivity : ComponentActivity() {
     private val viewModel: LauncherViewModel by viewModels()
     private var closeDrawerSignal by mutableStateOf(0)
 
+    private lateinit var appWidgetManager: AppWidgetManager
+    private lateinit var appWidgetHost: AppWidgetHost
+
+    private val widgetConfigureLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        val widgetId = res.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+            ?: AppWidgetManager.INVALID_APPWIDGET_ID
+        if (res.resultCode == Activity.RESULT_OK && widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            viewModel.addWidgetId(widgetId)
+        } else if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            appWidgetHost.deleteAppWidgetId(widgetId)
+        }
+    }
+
+    private val widgetPickLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { res ->
+        val widgetId = res.data?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
+            ?: AppWidgetManager.INVALID_APPWIDGET_ID
+        if (res.resultCode == Activity.RESULT_OK && widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            val info = appWidgetManager.getAppWidgetInfo(widgetId)
+            if (info?.configure != null) {
+                val cfgIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_CONFIGURE).apply {
+                    component = info.configure
+                    putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+                }
+                widgetConfigureLauncher.launch(cfgIntent)
+            } else {
+                viewModel.addWidgetId(widgetId)
+            }
+        } else if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+            appWidgetHost.deleteAppWidgetId(widgetId)
+        }
+    }
+
+    private fun launchWidgetPicker() {
+        val newId = appWidgetHost.allocateAppWidgetId()
+        val pickIntent = Intent(AppWidgetManager.ACTION_APPWIDGET_PICK).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, newId)
+        }
+        widgetPickLauncher.launch(pickIntent)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        appWidgetManager = AppWidgetManager.getInstance(this)
+        appWidgetHost = AppWidgetHost(this, 1024)
 
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -50,6 +101,7 @@ class MainActivity : ComponentActivity() {
             val isLoadingApps by viewModel.isLoadingApps.collectAsStateWithLifecycle()
             val privilegeStatus by viewModel.privilegeStatus.collectAsStateWithLifecycle()
             val clockState by viewModel.clockState.collectAsStateWithLifecycle()
+            val isWeatherRefreshing by viewModel.isWeatherRefreshing.collectAsStateWithLifecycle()
             val pinnedHomeApps by viewModel.pinnedHomeApps.collectAsStateWithLifecycle()
             val dockApps by viewModel.dockApps.collectAsStateWithLifecycle()
 
@@ -57,7 +109,6 @@ class MainActivity : ComponentActivity() {
             var focusDrawerSearch by remember { mutableStateOf(false) }
             var contextApp by remember { mutableStateOf<AppEntry?>(null) }
 
-            // Close drawer when Home key is pressed
             androidx.compose.runtime.LaunchedEffect(closeDrawerSignal) {
                 if (closeDrawerSignal > 0) drawerOpen = false
             }
@@ -89,9 +140,11 @@ class MainActivity : ComponentActivity() {
                     HomeWorkspaceScreen(
                         settings = settings,
                         clockState = clockState,
-                        privilegeStatus = privilegeStatus,
+                        isWeatherRefreshing = isWeatherRefreshing,
                         pinnedApps = pinnedHomeApps,
                         dockApps = dockApps,
+                        appWidgetHost = appWidgetHost,
+                        appWidgetManager = appWidgetManager,
                         contentPadding = insets,
                         onOpenDrawer = { focusSearch ->
                             focusDrawerSearch = focusSearch
@@ -99,8 +152,15 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenSettings = viewModel::openSettings,
                         onOpenWallpaper = viewModel::openWallpaperPicker,
+                        onAddWidget = ::launchWidgetPicker,
+                        onRemoveWidget = { id ->
+                            appWidgetHost.deleteAppWidgetId(id)
+                            viewModel.removeWidgetId(id)
+                        },
                         onLockScreen = viewModel::lockScreen,
                         onExpandNotifications = viewModel::expandNotifications,
+                        onRefreshWeather = { viewModel.refreshWeather(silent = false) },
+                        onSetWeatherCity = viewModel::setWeatherLocation,
                         onLaunchApp = viewModel::launchApp,
                         onLongPressApp = { contextApp = it }
                     )
@@ -126,7 +186,12 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = viewModel::openSettings,
                             onLockScreen = viewModel::lockScreen,
                             onRefreshApps = viewModel::refreshApps,
-                            onSearchWeb = viewModel::searchWeb
+                            onSearchWeb = viewModel::searchWeb,
+                            onLaunchHiddenApp = { pkg ->
+                                drawerOpen = false
+                                viewModel.launchHiddenApp(pkg)
+                            },
+                            onUnhideApp = viewModel::toggleHiddenPackage
                         )
                     }
 
@@ -158,6 +223,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        runCatching { appWidgetHost.startListening() }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        runCatching { appWidgetHost.stopListening() }
     }
 
     override fun onNewIntent(intent: Intent) {

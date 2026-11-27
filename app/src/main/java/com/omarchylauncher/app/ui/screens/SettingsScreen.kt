@@ -15,23 +15,32 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omarchylauncher.app.data.IconShape
 import com.omarchylauncher.app.data.LauncherSettings
+import com.omarchylauncher.app.data.WebSearchProvider
 import com.omarchylauncher.app.privilege.PrivilegeStatus
 import com.omarchylauncher.app.ui.components.KaruiBox
 import com.omarchylauncher.app.ui.components.KaruiButton
@@ -63,10 +72,16 @@ fun SettingsScreen(
     onSetShowDock: (Boolean) -> Unit,
     onSetShowHomeLabels: (Boolean) -> Unit,
     onSetMonochromeIcons: (Boolean) -> Unit,
+    onSetIconShape: (IconShape) -> Unit,
     onSetDrawerColumns: (Int) -> Unit,
     onSetDrawerListMode: (Boolean) -> Unit,
     onSetShowDrawerLabels: (Boolean) -> Unit,
     onSetAutoFocusSearch: (Boolean) -> Unit,
+    onSetWebSearchProvider: (WebSearchProvider) -> Unit,
+    onSetHiddenPin: (String) -> Unit,
+    onSetWeatherLocation: (String) -> Unit,
+    onSetWeatherRefreshMinutes: (Int) -> Unit,
+    onRefreshWeather: () -> Unit,
     onSetThemeName: (String) -> Unit,
     onSetSolidBg: (Boolean) -> Unit,
     onSetWallpaperDim: (Float) -> Unit,
@@ -143,6 +158,45 @@ fun SettingsScreen(
                         }
                     }
                     item {
+                        KaruiBox(title = "Weather (No GPS)") {
+                            var cityDraft by remember(settings.weatherLocation) { mutableStateOf(settings.weatherLocation) }
+                            Text("CITY NAME", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(palette.surface)
+                                        .border(2.dp, palette.border, RectangleShape)
+                                        .padding(10.dp)
+                                ) {
+                                    if (cityDraft.isEmpty()) {
+                                        Text("e.g. Tokyo, London", color = palette.gray, fontSize = 13.sp)
+                                    }
+                                    BasicTextField(
+                                        value = cityDraft,
+                                        onValueChange = { cityDraft = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                        cursorBrush = SolidColor(palette.accent),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                KaruiSubtleButton("Save", { onSetWeatherLocation(cityDraft) })
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("REFRESH INTERVAL", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("15m" to 15, "30m" to 30, "1h" to 60, "3h" to 180, "Manual" to 0).forEach { (lbl, mins) ->
+                                    KaruiChip(lbl, settings.weatherRefreshMinutes == mins, { onSetWeatherRefreshMinutes(mins) }, Modifier.weight(1f))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(10.dp))
+                            KaruiSubtleButton("Refresh Weather Now", onRefreshWeather, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                    item {
                         KaruiBox(title = "Gestures & Input") {
                             ToggleRow("Double-Tap to Lock Screen", "Uses Root or Accessibility Service", settings.doubleTapToSleep, onSetDoubleTapSleep)
                             Spacer(modifier = Modifier.height(10.dp))
@@ -186,6 +240,16 @@ fun SettingsScreen(
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
                             ToggleRow("Monochrome Icons", "Grayscale icons inside Karui frames", settings.monochromeIcons, onSetMonochromeIcons)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("ICON SHAPE", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                IconShape.entries.forEach { shape ->
+                                    KaruiChip(shape.label, settings.iconShape == shape, { onSetIconShape(shape) }, Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 }
@@ -211,6 +275,42 @@ fun SettingsScreen(
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
                             ToggleRow("Auto-Focus Search on Swipe Up", "Immediately open keyboard like Rofi/Walker", settings.autoFocusDrawerSearch, onSetAutoFocusSearch)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("DEFAULT WEB SEARCH", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                WebSearchProvider.entries.forEach { prov ->
+                                    KaruiChip(prov.label, settings.webSearchProvider == prov, { onSetWebSearchProvider(prov) }, Modifier.weight(1f))
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            var pinDraft by remember(settings.hiddenPin) { mutableStateOf(settings.hiddenPin) }
+                            Text("HIDDEN VAULT PIN (HOLD TOP-LEFT IN APPS)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .background(palette.surface)
+                                        .border(2.dp, palette.border, RectangleShape)
+                                        .padding(10.dp)
+                                ) {
+                                    BasicTextField(
+                                        value = pinDraft,
+                                        onValueChange = { if (it.length <= 8) pinDraft = it },
+                                        singleLine = true,
+                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                        cursorBrush = SolidColor(palette.accent),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                KaruiSubtleButton("Set PIN", { if (pinDraft.isNotBlank()) onSetHiddenPin(pinDraft) })
+                            }
                         }
                     }
                 }

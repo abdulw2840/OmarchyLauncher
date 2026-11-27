@@ -1,6 +1,7 @@
 package com.omarchylauncher.app.ui
 
 import android.app.Application
+import android.app.SearchManager
 import android.content.Intent
 import android.content.pm.ShortcutInfo
 import android.net.Uri
@@ -11,7 +12,10 @@ import androidx.lifecycle.viewModelScope
 import com.omarchylauncher.app.OmarchyLauncherApp
 import com.omarchylauncher.app.SettingsActivity
 import com.omarchylauncher.app.data.AppEntry
+import com.omarchylauncher.app.data.IconShape
 import com.omarchylauncher.app.data.LauncherSettings
+import com.omarchylauncher.app.data.WeatherService
+import com.omarchylauncher.app.data.WebSearchProvider
 import com.omarchylauncher.app.privilege.PrivilegeStatus
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -47,6 +52,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     private val _clockState = MutableStateFlow(ClockState())
     val clockState: StateFlow<ClockState> = _clockState.asStateFlow()
 
+    private val _isWeatherRefreshing = MutableStateFlow(false)
+    val isWeatherRefreshing: StateFlow<Boolean> = _isWeatherRefreshing.asStateFlow()
+
     val pinnedHomeApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
         s.pinnedHomePackages.distinct().mapNotNull { map[it] }
@@ -60,10 +68,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     init {
         refreshPrivileges()
         seedDefaultAppsOnce()
-        startClockTicker()
+        startClockAndWeatherTicker()
     }
 
-    private fun startClockTicker() {
+    private fun startClockAndWeatherTicker() {
         viewModelScope.launch {
             val bm = app.getSystemService(BatteryManager::class.java)
             while (isActive) {
@@ -74,7 +82,33 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     timeMillis = System.currentTimeMillis(),
                     batteryPercent = pct
                 )
+
+                val s = settings.value
+                if (s.weatherLocation.isNotBlank() && s.weatherRefreshMinutes > 0) {
+                    val elapsedMs = System.currentTimeMillis() - s.weatherLastUpdated
+                    if (elapsedMs >= s.weatherRefreshMinutes * 60_000L) {
+                        refreshWeather(silent = true)
+                    }
+                }
                 delay(15_000L)
+            }
+        }
+    }
+
+    fun refreshWeather(silent: Boolean = false) {
+        viewModelScope.launch {
+            val city = app.preferences.settingsFlow.first().weatherLocation
+            if (city.isBlank()) {
+                if (!silent) Toast.makeText(app, "Set a weather city first", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            _isWeatherRefreshing.value = true
+            val res = WeatherService.fetchWeather(city)
+            _isWeatherRefreshing.value = false
+            if (res != null) {
+                app.preferences.saveWeatherCache(res.tempText, res.descText, System.currentTimeMillis())
+            } else if (!silent) {
+                Toast.makeText(app, "Could not fetch weather for \"$city\"", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -127,9 +161,42 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun searchWeb(query: String) {
-        val encoded = Uri.encode(query)
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://duckduckgo.com/?q=$encoded")).apply {
+    fun searchWeb(query: String, provider: WebSearchProvider = settings.value.webSearchProvider) {
+        val clean = query.trim()
+        if (clean.isEmpty()) return
+
+        when (provider) {
+            WebSearchProvider.GOOGLE_APP -> {
+                val googleIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+                    putExtra(SearchManager.QUERY, clean)
+                    setPackage("com.google.android.googlequicksearchbox")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val launched = runCatching { app.startActivity(googleIntent); true }.getOrDefault(false)
+                if (!launched) {
+                    val genericSearch = Intent(Intent.ACTION_WEB_SEARCH).apply {
+                        putExtra(SearchManager.QUERY, clean)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { app.startActivity(genericSearch) }.onFailure {
+                        openUrl("https://www.google.com/search?q=${Uri.encode(clean)}")
+                    }
+                }
+            }
+            WebSearchProvider.BRAVE -> {
+                val braveUrl = "https://search.brave.com/search?q=${Uri.encode(clean)}"
+                val braveIntent = Intent(Intent.ACTION_VIEW, Uri.parse(braveUrl)).apply {
+                    setPackage("com.brave.browser")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                val launched = runCatching { app.startActivity(braveIntent); true }.getOrDefault(false)
+                if (!launched) openUrl(braveUrl)
+            }
+        }
+    }
+
+    private fun openUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         runCatching { app.startActivity(intent) }
@@ -174,6 +241,48 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun toggleHiddenPackage(pkg: String) {
+        viewModelScope.launch {
+            val currentlyHidden = settings.value.hiddenPackages.contains(pkg)
+            val newHidden = !currentlyHidden
+            app.preferences.setPackageHidden(pkg, newHidden)
+            if (privilegeStatus.value.isRootAvailable) {
+                val ok = app.privilegeController.hideAppWithRoot(pkg, newHidden)
+                if (ok) app.appRepository.refresh()
+                Toast.makeText(
+                    app,
+                    if (newHidden) "Hidden (Root) & moved to Vault" else "Unhidden & restored",
+                    Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Toast.makeText(
+                    app,
+                    if (newHidden) "Hidden in Vault" else "Restored from Vault",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        }
+    }
+
+    fun launchHiddenApp(pkg: String) {
+        viewModelScope.launch {
+            if (privilegeStatus.value.isRootAvailable) {
+                app.privilegeController.hideAppWithRoot(pkg, false)
+                delay(250)
+                app.appRepository.refresh()
+            }
+            val entry = app.appRepository.apps.value.find { it.packageName == pkg }
+            if (entry != null) {
+                app.appRepository.launchApp(entry)
+            } else {
+                val launchIntent = app.packageManager.getLaunchIntentForPackage(pkg)?.apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                if (launchIntent != null) runCatching { app.startActivity(launchIntent) }
+            }
+        }
+    }
+
     fun uninstallApp(packageName: String, useRoot: Boolean) {
         if (useRoot && privilegeStatus.value.isRootAvailable) {
             viewModelScope.launch {
@@ -208,7 +317,18 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setSwipeDownNotifications(v: Boolean) = viewModelScope.launch { app.preferences.setSwipeDownNotifications(v) }
     fun setHapticFeedback(v: Boolean) = viewModelScope.launch { app.preferences.setHapticFeedback(v) }
     fun setMonochromeIcons(v: Boolean) = viewModelScope.launch { app.preferences.setMonochromeIcons(v) }
+    fun setIconShape(v: IconShape) = viewModelScope.launch { app.preferences.setIconShape(v) }
+    fun setHiddenPin(v: String) = viewModelScope.launch { app.preferences.setHiddenPin(v) }
+    fun setWebSearchProvider(v: WebSearchProvider) = viewModelScope.launch { app.preferences.setWebSearchProvider(v) }
+    fun setWeatherLocation(city: String) {
+        viewModelScope.launch {
+            app.preferences.setWeatherLocation(city)
+            if (city.isNotBlank()) refreshWeather(silent = false)
+        }
+    }
+    fun setWeatherRefreshMinutes(mins: Int) = viewModelScope.launch { app.preferences.setWeatherRefreshMinutes(mins) }
     fun togglePinnedHome(pkg: String) = viewModelScope.launch { app.preferences.togglePinnedHome(pkg) }
     fun toggleDockPackage(pkg: String) = viewModelScope.launch { app.preferences.toggleDockPackage(pkg) }
-    fun toggleHiddenPackage(pkg: String) = viewModelScope.launch { app.preferences.toggleHiddenPackage(pkg) }
+    fun addWidgetId(id: Int) = viewModelScope.launch { app.preferences.addWidgetId(id) }
+    fun removeWidgetId(id: Int) = viewModelScope.launch { app.preferences.removeWidgetId(id) }
 }

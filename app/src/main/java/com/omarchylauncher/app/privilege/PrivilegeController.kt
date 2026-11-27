@@ -72,22 +72,34 @@ class PrivilegeController(private val context: Context) {
 
     @SuppressLint("WrongConstant")
     suspend fun expandNotifications(): Boolean = withContext(Dispatchers.IO) {
+        // 1. Try StatusBarManager with EXPAND_STATUS_BAR permission on main/binder
+        val sbOk = runCatching {
+            val sbService = context.getSystemService("statusbar")
+            val clazz = Class.forName("android.app.StatusBarManager")
+            clazz.getMethod("expandNotificationsPanel").invoke(sbService)
+            true
+        }.getOrDefault(false)
+        if (sbOk) return@withContext true
+
+        // 2. Try Root
         if (_status.value.isRootAvailable) {
             val res = runCatching {
                 Shell.cmd("cmd statusbar expand-notifications").exec().isSuccess
             }.getOrDefault(false)
             if (res) return@withContext true
         }
-        val a11yOk = LauncherAccessibilityService.instance?.expandNotifications() ?: false
-        if (a11yOk) return@withContext true
 
-        // Reflection fallback for StatusBarManager
-        runCatching {
-            val sbService = context.getSystemService("statusbar")
-            val clazz = Class.forName("android.app.StatusBarManager")
-            clazz.getMethod("expandNotificationsPanel").invoke(sbService)
-            true
-        }.getOrDefault(false)
+        // 3. Accessibility fallback
+        LauncherAccessibilityService.instance?.expandNotifications() ?: false
+    }
+
+    suspend fun hideAppWithRoot(packageName: String, hide: Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (!_status.value.isRootAvailable) return@withContext false
+        val primary = if (hide) "pm hide $packageName" else "pm unhide $packageName"
+        val ok = runCatching { Shell.cmd(primary).exec().isSuccess }.getOrDefault(false)
+        if (ok) return@withContext true
+        val fallback = if (hide) "pm disable-user --user 0 $packageName" else "pm enable $packageName"
+        runCatching { Shell.cmd(fallback).exec().isSuccess }.getOrDefault(false)
     }
 
     suspend fun forceStopApp(packageName: String): Boolean = withContext(Dispatchers.IO) {

@@ -22,6 +22,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -30,6 +32,7 @@ import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GridView
+import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.ViewList
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -37,18 +40,19 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
@@ -59,16 +63,24 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.omarchylauncher.app.data.AppEntry
 import com.omarchylauncher.app.data.LauncherSettings
+import com.omarchylauncher.app.data.WebSearchProvider
 import com.omarchylauncher.app.ui.components.KaruiAppTile
+import com.omarchylauncher.app.ui.components.KaruiButton
+import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiPivotHeader
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
+import com.omarchylauncher.app.ui.components.iconShapeToComposeShape
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 @Composable
@@ -85,16 +97,22 @@ fun AppDrawerScreen(
     onOpenSettings: () -> Unit,
     onLockScreen: () -> Unit,
     onRefreshApps: () -> Unit,
-    onSearchWeb: (String) -> Unit
+    onSearchWeb: (String, WebSearchProvider) -> Unit,
+    onLaunchHiddenApp: (String) -> Unit,
+    onUnhideApp: (String) -> Unit
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
 
     var query by remember { mutableStateOf("") }
-    var selectedTab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("all", "user", "system", "hidden")
+    val tabs = listOf("all", "user", "system")
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
     val focusRequester = remember { FocusRequester() }
+
+    var showPinDialog by remember { mutableStateOf(false) }
+    var showHiddenVault by remember { mutableStateOf(false) }
 
     LaunchedEffect(focusSearchOnOpen) {
         if (focusSearchOnOpen) {
@@ -103,29 +121,11 @@ fun AppDrawerScreen(
     }
 
     val mathResult = remember(query) {
-        if (query.startsWith("=") && query.length > 1) {
-            evalSimpleMath(query.drop(1))
+        val raw = query.trim()
+        val expr = if (raw.startsWith("=")) raw.drop(1) else raw
+        if (expr.isNotEmpty() && expr.any { it in "+-*/" } && expr.any { it.isDigit() }) {
+            evalSimpleMath(expr)
         } else null
-    }
-
-    val filteredApps by remember(apps, settings.hiddenPackages, query, selectedTab) {
-        derivedStateOf {
-            val cleanQuery = if (query.startsWith(":") || query.startsWith("=")) "" else query.trim()
-            apps.filter { app ->
-                val isHidden = settings.hiddenPackages.contains(app.packageName)
-                val tabMatch = when (selectedTab) {
-                    0 -> !isHidden
-                    1 -> !isHidden && !app.isSystem
-                    2 -> !isHidden && app.isSystem
-                    3 -> isHidden
-                    else -> true
-                }
-                val queryMatch = cleanQuery.isEmpty() ||
-                    app.label.contains(cleanQuery, ignoreCase = true) ||
-                    app.packageName.contains(cleanQuery, ignoreCase = true)
-                tabMatch && queryMatch
-            }
-        }
     }
 
     Column(
@@ -137,10 +137,26 @@ fun AppDrawerScreen(
             KaruiPivotHeader(
                 title = "apps",
                 tabs = tabs,
-                selectedIndex = selectedTab,
-                onSelect = { selectedTab = it },
+                selectedIndex = pagerState.currentPage,
+                onSelect = { idx -> scope.launch { pagerState.animateScrollToPage(idx) } },
                 topInset = contentPadding.calculateTopPadding()
             )
+
+            // Invisible/subtle long-press target over the top-left "apps" title for Hidden Vault
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = contentPadding.calculateTopPadding() + 8.dp, start = 12.dp)
+                    .size(width = 120.dp, height = 52.dp)
+                    .combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            if (settings.hapticFeedback) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            showPinDialog = true
+                        }
+                    )
+            )
+
             Row(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -180,7 +196,7 @@ fun AppDrawerScreen(
             }
         }
 
-        // Omarchy Terminal Prompt Search Bar
+        // Clean Search Bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -201,12 +217,10 @@ fun AppDrawerScreen(
             Box(modifier = Modifier.weight(1f)) {
                 if (query.isEmpty()) {
                     Text(
-                        text = "search apps, =2+2, :settings, :lock",
+                        text = "search",
                         color = palette.gray,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = (13 * scale).sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        fontSize = (13 * scale).sp
                     )
                 }
                 BasicTextField(
@@ -219,17 +233,15 @@ fun AppDrawerScreen(
                         fontSize = (14 * scale).sp
                     ),
                     cursorBrush = SolidColor(palette.accent),
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(
-                        onGo = {
+                        onSearch = {
                             when (query.trim().lowercase()) {
                                 ":settings" -> { onClose(); onOpenSettings() }
                                 ":lock" -> { onClose(); onLockScreen() }
                                 ":refresh" -> { onRefreshApps(); query = "" }
-                                else -> if (filteredApps.size == 1) {
-                                    onLaunchApp(filteredApps.first())
-                                } else if (query.isNotBlank() && filteredApps.isEmpty() && mathResult == null) {
-                                    onSearchWeb(query.trim())
+                                else -> if (query.isNotBlank() && mathResult == null) {
+                                    onSearchWeb(query.trim(), settings.webSearchProvider)
                                 }
                             }
                         }
@@ -254,6 +266,7 @@ fun AppDrawerScreen(
             }
         }
 
+        // Live Math Result
         if (mathResult != null) {
             Box(
                 modifier = Modifier
@@ -273,6 +286,7 @@ fun AppDrawerScreen(
             }
         }
 
+        // Quick Commands
         if (query.startsWith(":")) {
             Column(
                 modifier = Modifier
@@ -286,130 +300,308 @@ fun AppDrawerScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Web Search Bar Actions (Google App / Brave Search)
+        if (query.isNotBlank() && !query.startsWith(":") && mathResult == null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                KaruiSubtleButton(
+                    text = "Google App",
+                    onClick = { onSearchWeb(query.trim(), WebSearchProvider.GOOGLE_APP) },
+                    modifier = Modifier.weight(1f)
+                )
+                KaruiSubtleButton(
+                    text = "Brave Search",
+                    onClick = { onSearchWeb(query.trim(), WebSearchProvider.BRAVE) },
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(6.dp))
 
         if (isLoading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = palette.accent)
             }
-        } else if (filteredApps.isEmpty() && query.isNotBlank() && !query.startsWith(":") && mathResult == null) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "NO MATCHING APPS",
-                    color = palette.gray,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = (13 * scale).sp
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                KaruiSubtleButton(
-                    text = "Search Web for \"$query\"",
-                    onClick = { onSearchWeb(query.trim()) }
-                )
-            }
-        } else if (settings.drawerListMode) {
-            // Omarchy Terminal List Mode
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    end = 16.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 24.dp
-                )
-            ) {
-                items(filteredApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
+        } else {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f)
+            ) { page ->
+                val cleanQuery = if (query.startsWith(":")) "" else query.trim()
+                val pageApps = remember(apps, settings.hiddenPackages, cleanQuery, page) {
+                    apps.filter { app ->
+                        val isHidden = settings.hiddenPackages.contains(app.packageName)
+                        val tabMatch = when (page) {
+                            0 -> !isHidden
+                            1 -> !isHidden && !app.isSystem
+                            2 -> !isHidden && app.isSystem
+                            else -> !isHidden
+                        }
+                        val queryMatch = cleanQuery.isEmpty() ||
+                            app.label.contains(cleanQuery, ignoreCase = true) ||
+                            app.packageName.contains(cleanQuery, ignoreCase = true)
+                        tabMatch && queryMatch
+                    }
+                }
+
+                if (pageApps.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "NO APPS",
+                            color = palette.gray,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = (13 * scale).sp
+                        )
+                    }
+                } else if (settings.drawerListMode) {
+                    val frameShape = iconShapeToComposeShape(settings.iconShape)
                     val monoFilter = if (settings.monochromeIcons) {
                         ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
                     } else null
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .combinedClickable(
-                                onClick = { onLaunchApp(app) },
-                                onLongClick = {
-                                    if (settings.hapticFeedback) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onLongPressApp(app)
-                                }
-                            )
-                            .drawBehind {
-                                drawLine(
-                                    color = palette.border,
-                                    start = Offset(0f, size.height),
-                                    end = Offset(size.width, size.height),
-                                    strokeWidth = 1.dp.toPx()
-                                )
-                            }
-                            .padding(vertical = (10 * scale).dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            bottom = contentPadding.calculateBottomPadding() + 24.dp
+                        )
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .background(palette.surface)
-                                .border(1.dp, palette.border, RectangleShape)
-                                .padding(3.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            if (app.icon != null) {
-                                Image(
-                                    bitmap = app.icon,
-                                    contentDescription = app.label,
-                                    colorFilter = monoFilter,
-                                    modifier = Modifier.fillMaxSize()
-                                )
-                            } else {
-                                Icon(Icons.Rounded.Apps, null, tint = palette.accent)
+                        items(pageApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .combinedClickable(
+                                        onClick = { onLaunchApp(app) },
+                                        onLongClick = {
+                                            if (settings.hapticFeedback) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            onLongPressApp(app)
+                                        }
+                                    )
+                                    .drawBehind {
+                                        drawLine(
+                                            color = palette.border,
+                                            start = Offset(0f, size.height),
+                                            end = Offset(size.width, size.height),
+                                            strokeWidth = 1.dp.toPx()
+                                        )
+                                    }
+                                    .padding(vertical = (10 * scale).dp, horizontal = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(34.dp)
+                                        .clip(frameShape)
+                                        .background(palette.surface)
+                                        .border(1.dp, palette.border, frameShape)
+                                        .padding(3.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (app.icon != null) {
+                                        Image(
+                                            bitmap = app.icon,
+                                            contentDescription = app.label,
+                                            colorFilter = monoFilter,
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .clip(frameShape)
+                                        )
+                                    } else {
+                                        Icon(Icons.Rounded.Apps, null, tint = palette.accent)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = app.label,
+                                        color = palette.text,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = (15 * scale).sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = app.packageName,
+                                        color = palette.gray,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = (11 * scale).sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
                             }
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = app.label,
-                                color = palette.text,
-                                fontWeight = FontWeight.Medium,
-                                fontSize = (15 * scale).sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = app.packageName,
-                                color = palette.gray,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = (11 * scale).sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                    }
+                } else {
+                    LazyVerticalGrid(
+                        columns = GridCells.Fixed(settings.drawerColumns),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(
+                            start = 12.dp,
+                            end = 12.dp,
+                            bottom = contentPadding.calculateBottomPadding() + 24.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(pageApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
+                            KaruiAppTile(
+                                app = app,
+                                showLabel = settings.showDrawerLabels,
+                                monochrome = settings.monochromeIcons,
+                                hapticsEnabled = settings.hapticFeedback,
+                                iconShape = settings.iconShape,
+                                onClick = { onLaunchApp(app) },
+                                onLongClick = { onLongPressApp(app) }
                             )
                         }
                     }
                 }
             }
-        } else {
-            // Grid Mode
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(settings.drawerColumns),
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    end = 12.dp,
-                    bottom = contentPadding.calculateBottomPadding() + 24.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+        }
+    }
+
+    // PIN Code Prompt for Hidden Apps Vault
+    if (showPinDialog) {
+        var pinInput by remember { mutableStateOf("") }
+        var pinError by remember { mutableStateOf(false) }
+        Dialog(onDismissRequest = { showPinDialog = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(palette.surface)
+                    .border(2.dp, palette.border, RectangleShape)
+                    .padding(14.dp)
             ) {
-                items(filteredApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
-                    KaruiAppTile(
-                        app = app,
-                        showLabel = settings.showDrawerLabels,
-                        monochrome = settings.monochromeIcons,
-                        hapticsEnabled = settings.hapticFeedback,
-                        onClick = { onLaunchApp(app) },
-                        onLongClick = { onLongPressApp(app) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Rounded.Lock, null, tint = palette.accent, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "HIDDEN VAULT PIN",
+                        color = palette.accent,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (14 * scale).sp
                     )
+                }
+                Spacer(Modifier.height(10.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(palette.bg)
+                        .border(2.dp, palette.border, RectangleShape)
+                        .padding(12.dp)
+                ) {
+                    if (pinInput.isEmpty()) {
+                        Text("Enter PIN (default 0000)", color = palette.gray, fontSize = 13.sp)
+                    }
+                    BasicTextField(
+                        value = pinInput,
+                        onValueChange = { pinInput = it; pinError = false },
+                        singleLine = true,
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 16.sp),
+                        cursorBrush = SolidColor(palette.accent),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                if (pinError) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Incorrect PIN", color = Color(0xFFEF5350), fontSize = 12.sp)
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KaruiSubtleButton("Cancel", { showPinDialog = false }, Modifier.weight(1f))
+                    KaruiButton("Unlock", {
+                        if (pinInput == settings.hiddenPin) {
+                            showPinDialog = false
+                            showHiddenVault = true
+                        } else {
+                            pinError = true
+                        }
+                    }, Modifier.weight(1f))
+                }
+            }
+        }
+    }
+
+    // Hidden Apps Vault Dialog (Amarok-style)
+    if (showHiddenVault) {
+        val hiddenList = settings.hiddenPackages.sorted()
+        Dialog(onDismissRequest = { showHiddenVault = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(palette.surface)
+                    .border(2.dp, palette.border, RectangleShape)
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "HIDDEN VAULT (${hiddenList.size})",
+                        color = palette.accent,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (14 * scale).sp
+                    )
+                    KaruiSubtleButton("Close", { showHiddenVault = false })
+                }
+                Spacer(Modifier.height(10.dp))
+                KaruiDashedDivider()
+                Spacer(Modifier.height(10.dp))
+
+                if (hiddenList.isEmpty()) {
+                    Text(
+                        text = "No hidden apps. Long-press any app and tap HIDE APP.",
+                        color = palette.gray,
+                        fontSize = (12 * scale).sp
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.height(260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(hiddenList, key = { it }) { pkg ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(palette.bg)
+                                    .border(1.dp, palette.border, RectangleShape)
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = pkg,
+                                    color = palette.text,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = (12 * scale).sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    KaruiSubtleButton("Open", {
+                                        showHiddenVault = false
+                                        onLaunchHiddenApp(pkg)
+                                    })
+                                    KaruiSubtleButton("Unhide", { onUnhideApp(pkg) })
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

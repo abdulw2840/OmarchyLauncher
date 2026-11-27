@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -14,6 +15,18 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "omarchy_launcher_prefs")
+
+enum class IconShape(val label: String) {
+    SQUARE("Square"),
+    CIRCLE("Circle"),
+    IOS("iOS"),
+    ONEUI("One UI")
+}
+
+enum class WebSearchProvider(val label: String) {
+    GOOGLE_APP("Google App"),
+    BRAVE("Brave Search")
+}
 
 data class LauncherSettings(
     val themeName: String = "tokyo-night",
@@ -34,9 +47,18 @@ data class LauncherSettings(
     val swipeDownNotifications: Boolean = true,
     val hapticFeedback: Boolean = true,
     val monochromeIcons: Boolean = false,
+    val iconShape: IconShape = IconShape.SQUARE,
+    val hiddenPin: String = "0000",
+    val webSearchProvider: WebSearchProvider = WebSearchProvider.GOOGLE_APP,
+    val weatherLocation: String = "",
+    val weatherRefreshMinutes: Int = 30,
+    val weatherTempText: String = "",
+    val weatherDescText: String = "",
+    val weatherLastUpdated: Long = 0L,
     val pinnedHomePackages: List<String> = emptyList(),
     val dockPackages: List<String> = emptyList(),
-    val hiddenPackages: Set<String> = emptySet()
+    val hiddenPackages: Set<String> = emptySet(),
+    val widgetIds: List<Int> = emptyList()
 )
 
 class LauncherPreferences(private val context: Context) {
@@ -60,12 +82,29 @@ class LauncherPreferences(private val context: Context) {
         val SWIPE_DOWN_NOTIF = booleanPreferencesKey("swipe_down_notif")
         val HAPTIC = booleanPreferencesKey("haptic")
         val MONOCHROME_ICONS = booleanPreferencesKey("monochrome_icons")
+        val ICON_SHAPE = stringPreferencesKey("icon_shape")
+        val HIDDEN_PIN = stringPreferencesKey("hidden_pin")
+        val WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
+        val WEATHER_LOCATION = stringPreferencesKey("weather_location")
+        val WEATHER_REFRESH_MIN = intPreferencesKey("weather_refresh_min")
+        val WEATHER_TEMP = stringPreferencesKey("weather_temp")
+        val WEATHER_DESC = stringPreferencesKey("weather_desc")
+        val WEATHER_UPDATED = longPreferencesKey("weather_updated")
         val PINNED_HOME = stringPreferencesKey("pinned_home_csv")
         val DOCK_PKGS = stringPreferencesKey("dock_pkgs_csv")
         val HIDDEN_PKGS = stringSetPreferencesKey("hidden_pkgs")
+        val WIDGET_IDS = stringPreferencesKey("widget_ids_csv")
     }
 
     val settingsFlow: Flow<LauncherSettings> = context.dataStore.data.map { p ->
+        val shape = runCatching {
+            IconShape.valueOf(p[Keys.ICON_SHAPE] ?: IconShape.SQUARE.name)
+        }.getOrDefault(IconShape.SQUARE)
+
+        val searchProv = runCatching {
+            WebSearchProvider.valueOf(p[Keys.WEB_SEARCH_PROVIDER] ?: WebSearchProvider.GOOGLE_APP.name)
+        }.getOrDefault(WebSearchProvider.GOOGLE_APP)
+
         LauncherSettings(
             themeName = p[Keys.THEME_NAME] ?: "tokyo-night",
             uiScale = (p[Keys.UI_SCALE] ?: 1.0f).coerceIn(0.85f, 1.3f),
@@ -85,14 +124,26 @@ class LauncherPreferences(private val context: Context) {
             swipeDownNotifications = p[Keys.SWIPE_DOWN_NOTIF] ?: true,
             hapticFeedback = p[Keys.HAPTIC] ?: true,
             monochromeIcons = p[Keys.MONOCHROME_ICONS] ?: false,
+            iconShape = shape,
+            hiddenPin = p[Keys.HIDDEN_PIN] ?: "0000",
+            webSearchProvider = searchProv,
+            weatherLocation = p[Keys.WEATHER_LOCATION] ?: "",
+            weatherRefreshMinutes = p[Keys.WEATHER_REFRESH_MIN] ?: 30,
+            weatherTempText = p[Keys.WEATHER_TEMP] ?: "",
+            weatherDescText = p[Keys.WEATHER_DESC] ?: "",
+            weatherLastUpdated = p[Keys.WEATHER_UPDATED] ?: 0L,
             pinnedHomePackages = parseCsv(p[Keys.PINNED_HOME]),
             dockPackages = parseCsv(p[Keys.DOCK_PKGS]),
-            hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet()
+            hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet(),
+            widgetIds = parseIntCsv(p[Keys.WIDGET_IDS])
         )
     }
 
     private fun parseCsv(raw: String?): List<String> =
         raw?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+
+    private fun parseIntCsv(raw: String?): List<Int> =
+        parseCsv(raw).mapNotNull { it.toIntOrNull() }
 
     suspend fun setThemeName(value: String) = context.dataStore.edit { it[Keys.THEME_NAME] = value }
     suspend fun setUiScale(value: Float) = context.dataStore.edit { it[Keys.UI_SCALE] = value.coerceIn(0.85f, 1.3f) }
@@ -112,6 +163,19 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setSwipeDownNotifications(value: Boolean) = context.dataStore.edit { it[Keys.SWIPE_DOWN_NOTIF] = value }
     suspend fun setHapticFeedback(value: Boolean) = context.dataStore.edit { it[Keys.HAPTIC] = value }
     suspend fun setMonochromeIcons(value: Boolean) = context.dataStore.edit { it[Keys.MONOCHROME_ICONS] = value }
+    suspend fun setIconShape(shape: IconShape) = context.dataStore.edit { it[Keys.ICON_SHAPE] = shape.name }
+    suspend fun setHiddenPin(pin: String) = context.dataStore.edit { it[Keys.HIDDEN_PIN] = pin }
+    suspend fun setWebSearchProvider(provider: WebSearchProvider) = context.dataStore.edit { it[Keys.WEB_SEARCH_PROVIDER] = provider.name }
+    suspend fun setWeatherLocation(city: String) = context.dataStore.edit { it[Keys.WEATHER_LOCATION] = city.trim() }
+    suspend fun setWeatherRefreshMinutes(mins: Int) = context.dataStore.edit { it[Keys.WEATHER_REFRESH_MIN] = mins }
+
+    suspend fun saveWeatherCache(temp: String, desc: String, ts: Long) {
+        context.dataStore.edit {
+            it[Keys.WEATHER_TEMP] = temp
+            it[Keys.WEATHER_DESC] = desc
+            it[Keys.WEATHER_UPDATED] = ts
+        }
+    }
 
     suspend fun togglePinnedHome(pkg: String) {
         context.dataStore.edit { p ->
@@ -129,11 +193,27 @@ class LauncherPreferences(private val context: Context) {
         }
     }
 
-    suspend fun toggleHiddenPackage(pkg: String) {
+    suspend fun setPackageHidden(pkg: String, hide: Boolean) {
         context.dataStore.edit { p ->
             val set = (p[Keys.HIDDEN_PKGS] ?: emptySet()).toMutableSet()
-            if (!set.add(pkg)) set.remove(pkg)
+            if (hide) set.add(pkg) else set.remove(pkg)
             p[Keys.HIDDEN_PKGS] = set
+        }
+    }
+
+    suspend fun addWidgetId(widgetId: Int) {
+        context.dataStore.edit { p ->
+            val list = parseIntCsv(p[Keys.WIDGET_IDS]).toMutableList()
+            if (!list.contains(widgetId)) list.add(widgetId)
+            p[Keys.WIDGET_IDS] = list.joinToString(",")
+        }
+    }
+
+    suspend fun removeWidgetId(widgetId: Int) {
+        context.dataStore.edit { p ->
+            val list = parseIntCsv(p[Keys.WIDGET_IDS]).toMutableList()
+            list.remove(widgetId)
+            p[Keys.WIDGET_IDS] = list.joinToString(",")
         }
     }
 
