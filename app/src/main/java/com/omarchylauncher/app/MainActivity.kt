@@ -24,6 +24,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,6 +46,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
@@ -190,6 +192,7 @@ class MainActivity : ComponentActivity() {
             var showWidgetPicker by remember { mutableStateOf(false) }
             var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
             var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
+            var dockTopY by remember { mutableStateOf(Float.MAX_VALUE) }
 
             LaunchedEffect(homeResetSignal) {
                 if (homeResetSignal > 0) drawerOpen = false
@@ -229,6 +232,8 @@ class MainActivity : ComponentActivity() {
                         appWidgetHost = appWidgetHost,
                         appWidgetManager = appWidgetManager,
                         homeResetSignal = homeResetSignal,
+                        externalDragActive = draggingDrawerApp != null,
+                        onDockTopReported = { dockTopY = it },
                         contentPadding = insets,
                         onOpenDrawer = { focusSearch ->
                             focusDrawerSearch = focusSearch
@@ -308,7 +313,7 @@ class MainActivity : ComponentActivity() {
                                 draggingDrawerApp = null
                                 if (commit && dropped != null) {
                                     drawerOpen = false
-                                    if (settings.showDock && dropY >= screenHeightPx * 0.80f) {
+                                    if (settings.showDock && dropY >= dockTopY - 32f) {
                                         viewModel.addDockPackage(dropped.packageName)
                                     } else {
                                         viewModel.addPinnedHomeAt(dropped.packageName)
@@ -446,15 +451,29 @@ class MainActivity : ComponentActivity() {
                                 } else {
                                     Text("ICON PACKS (${iconPacks.size})", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     Spacer(Modifier.height(6.dp))
-                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        iconPacks.take(3).forEach { pack ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        iconPacks.forEach { pack ->
                                             KaruiChip(
                                                 label = pack.label,
                                                 selected = selectedPack?.packageName == pack.packageName,
-                                                onClick = { selectedPack = pack },
-                                                modifier = Modifier.weight(1f)
+                                                onClick = { selectedPack = pack }
                                             )
                                         }
+                                    }
+                                    selectedPack?.let { sp ->
+                                        Spacer(Modifier.height(6.dp))
+                                        Text(
+                                            text = "PACK: ${sp.label.uppercase()}",
+                                            color = palette.accent,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp
+                                        )
                                     }
                                     Spacer(Modifier.height(8.dp))
                                     Box(

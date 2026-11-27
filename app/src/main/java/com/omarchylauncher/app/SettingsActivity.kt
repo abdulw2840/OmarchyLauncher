@@ -78,6 +78,7 @@ class SettingsActivity : ComponentActivity() {
                     onSetDrawerColumns = viewModel::setDrawerColumns,
                     onSetDrawerListMode = viewModel::setDrawerListMode,
                     onSetDrawerBgAlpha = viewModel::setDrawerBgAlpha,
+                    onSetShowDrawerTabs = viewModel::setShowDrawerTabs,
                     onSetShowDrawerLabels = viewModel::setShowDrawerLabels,
                     onSetAutoFocusSearch = viewModel::setAutoFocusDrawerSearch,
                     onSetWebSearchProvider = viewModel::setWebSearchProvider,

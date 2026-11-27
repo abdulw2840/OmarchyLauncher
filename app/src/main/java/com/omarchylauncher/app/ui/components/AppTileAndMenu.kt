@@ -71,8 +71,9 @@ fun KaruiAppTile(
     val haptic = LocalHapticFeedback.current
     val frameShape = iconShapeToComposeShape(iconShape)
 
-    val themedBitmap = if (monochrome && app.monochromeIcon != null) app.monochromeIcon else app.icon
+    val themedBitmap = if (!app.hasCustomIcon && monochrome && app.monochromeIcon != null) app.monochromeIcon else app.icon
     val themedFilter = when {
+        app.hasCustomIcon -> null
         monochrome && app.monochromeIcon != null -> ColorFilter.tint(palette.accent, BlendMode.SrcIn)
         monochrome -> ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
         else -> null

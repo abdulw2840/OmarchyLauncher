@@ -125,8 +125,8 @@ fun AppDrawerScreen(
     val scope = rememberCoroutineScope()
 
     var query by remember { mutableStateOf("") }
-    val tabs = listOf("all", "user", "system")
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { tabs.size })
+    val tabs = if (settings.showDrawerTabs) listOf("all", "user", "system") else emptyList()
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { if (settings.showDrawerTabs) 3 else 1 })
     val focusRequester = remember { FocusRequester() }
 
     var showPinDialog by remember { mutableStateOf(false) }
@@ -409,6 +409,7 @@ fun AppDrawerScreen(
         } else {
             HorizontalPager(
                 state = pagerState,
+                userScrollEnabled = settings.showDrawerTabs,
                 modifier = Modifier.weight(1f)
             ) { page ->
                 val cleanQuery = if (query.startsWith(":")) "" else query.trim()

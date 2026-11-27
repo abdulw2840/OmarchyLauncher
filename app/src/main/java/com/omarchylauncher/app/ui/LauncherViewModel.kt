@@ -97,7 +97,8 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         return entry.copy(
             label = customLbl ?: entry.label,
             icon = customBitmap ?: entry.icon,
-            monochromeIcon = if (customBitmap != null) customBitmap else entry.monochromeIcon
+            monochromeIcon = if (customBitmap != null) null else entry.monochromeIcon,
+            hasCustomIcon = customBitmap != null
         )
     }
 
@@ -438,6 +439,7 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setCornerRadiusDp(v: Int) = viewModelScope.launch { app.preferences.setCornerRadiusDp(v) }
     fun setIconSizeDp(v: Int) = viewModelScope.launch { app.preferences.setIconSizeDp(v) }
     fun setDrawerBgAlpha(v: Float) = viewModelScope.launch { app.preferences.setDrawerBgAlpha(v) }
+    fun setShowDrawerTabs(v: Boolean) = viewModelScope.launch { app.preferences.setShowDrawerTabs(v) }
     fun reorderPinnedHome(fromIndex: Int, toIndex: Int) = viewModelScope.launch { app.preferences.reorderPinnedHome(fromIndex, toIndex) }
     fun setPinnedHomePackages(pkgs: List<String>) = viewModelScope.launch { app.preferences.setPinnedHomePackages(pkgs) }
     fun setDockPackages(pkgs: List<String>) = viewModelScope.launch { app.preferences.setDockPackages(pkgs) }

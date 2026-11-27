@@ -32,7 +32,8 @@ data class AppEntry(
     val isSystem: Boolean,
     val userHandle: UserHandle,
     val icon: ImageBitmap?,
-    val monochromeIcon: ImageBitmap? = null
+    val monochromeIcon: ImageBitmap? = null,
+    val hasCustomIcon: Boolean = false
 ) {
     val componentName: ComponentName get() = ComponentName(packageName, activityName)
 }
@@ -52,6 +53,7 @@ class AppRepository(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val launcherApps = context.getSystemService(LauncherApps::class.java)
+    private val iconCache = android.util.LruCache<String, ImageBitmap>(256)
 
     private val _apps = MutableStateFlow<List<AppEntry>>(emptyList())
     val apps: StateFlow<List<AppEntry>> = _apps.asStateFlow()
@@ -222,6 +224,7 @@ class AppRepository(private val context: Context) {
     }
 
     fun loadIconFromSpec(spec: String): ImageBitmap? {
+        iconCache.get(spec)?.let { return it }
         val parts = spec.split("/", limit = 2)
         if (parts.size != 2) return null
         val packPkg = parts[0]
@@ -231,7 +234,9 @@ class AppRepository(private val context: Context) {
             val id = res.getIdentifier(drawableName, "drawable", packPkg)
             if (id == 0) return null
             val drawable = res.getDrawable(id, null) ?: return null
-            drawable.toBitmap(96, 96).asImageBitmap()
+            val bmp = drawable.toBitmap(96, 96).asImageBitmap()
+            iconCache.put(spec, bmp)
+            bmp
         }.getOrNull()
     }
 }

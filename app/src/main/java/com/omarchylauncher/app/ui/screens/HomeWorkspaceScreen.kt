@@ -5,6 +5,9 @@ import android.appwidget.AppWidgetManager
 import android.os.Bundle
 import android.text.format.DateFormat
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -25,6 +28,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -68,6 +72,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalConfiguration
@@ -112,6 +117,8 @@ fun HomeWorkspaceScreen(
     appWidgetHost: AppWidgetHost,
     appWidgetManager: AppWidgetManager,
     homeResetSignal: Int,
+    externalDragActive: Boolean = false,
+    onDockTopReported: (Float) -> Unit = {},
     contentPadding: PaddingValues,
     onOpenDrawer: (focusSearch: Boolean) -> Unit,
     onOpenSettings: () -> Unit,
@@ -146,6 +153,19 @@ fun HomeWorkspaceScreen(
     var dockTopY by remember { mutableFloatStateOf(Float.MAX_VALUE) }
     var activeDragRootPos by remember { mutableStateOf(Offset.Zero) }
     var activeDragIsSystem by remember { mutableStateOf(false) }
+    var activeDragApp by remember { mutableStateOf<AppEntry?>(null) }
+
+    val isAnyDragActive = draggingPkg != null || draggingDockPkg != null || externalDragActive
+    val workspaceScale by animateFloatAsState(
+        targetValue = if (isAnyDragActive) 0.88f else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "wsScale"
+    )
+    val workspaceOffsetYPx by animateFloatAsState(
+        targetValue = if (isAnyDragActive) with(density) { 46.dp.toPx() } else 0f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
+        label = "wsOffsetY"
+    )
 
     var showHomeMenu by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
@@ -244,7 +264,15 @@ fun HomeWorkspaceScreen(
                 end = 16.dp
             )
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = workspaceScale
+                    scaleY = workspaceScale
+                    translationY = workspaceOffsetYPx
+                }
+        ) {
             HorizontalPager(
                 state = pagerState,
                 pageSpacing = 24.dp,
@@ -253,7 +281,15 @@ fun HomeWorkspaceScreen(
             ) { page ->
                 if (page == 0) {
                     // Default Home Screen
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = workspaceScale
+                    scaleY = workspaceScale
+                    translationY = workspaceOffsetYPx
+                }
+        ) {
                         if (settings.showAtAGlance) {
                             KaruiBox(title = "omarchy // status", contentPadding = 12.dp) {
                                 Text(
@@ -369,22 +405,17 @@ fun HomeWorkspaceScreen(
                                         Box(
                                             modifier = Modifier
                                                 .then(if (!isDragging) Modifier.animateItem() else Modifier)
-                                                .zIndex(if (isDragging) 10f else 0f)
                                                 .onGloballyPositioned { coords ->
                                                     itemRootPos = coords.positionInRoot()
                                                 }
                                                 .graphicsLayer {
-                                                    if (isDragging) {
-                                                        translationX = dragOffset.x
-                                                        translationY = dragOffset.y
-                                                        scaleX = 1.08f
-                                                        scaleY = 1.08f
-                                                    }
+                                                    alpha = if (isDragging) 0f else 1f
                                                 }
                                                 .pointerInput(app.packageName) {
                                                     detectDragGesturesAfterLongPress(
                                                         onDragStart = { offset ->
                                                             draggingPkg = app.packageName
+                                                            activeDragApp = app
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
                                                             swapCount = 0
@@ -446,7 +477,7 @@ fun HomeWorkspaceScreen(
                                                                         onRemoveHomeApp(app.packageName)
                                                                     }
                                                                 }
-                                                                settings.showDock && droppedY >= dockTopY -> {
+                                                                settings.showDock && droppedY >= dockTopY - 32f -> {
                                                                     onMoveHomeToDock(app.packageName)
                                                                 }
                                                                 swapCount > 0 -> {
@@ -454,12 +485,14 @@ fun HomeWorkspaceScreen(
                                                                 }
                                                             }
                                                             draggingPkg = null
+                                                            activeDragApp = null
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
                                                             swapCount = 0
                                                         },
                                                         onDragCancel = {
                                                             draggingPkg = null
+                                                            activeDragApp = null
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
                                                             swapCount = 0
@@ -485,7 +518,15 @@ fun HomeWorkspaceScreen(
                     }
                 } else {
                     // Extra Widget Page(s) — Omarchy Tiling WM (2-column tiling layout)
-                    Column(modifier = Modifier.fillMaxSize()) {
+                    Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = workspaceScale
+                    scaleY = workspaceScale
+                    translationY = workspaceOffsetYPx
+                }
+        ) {
                         val pageWidgets = if (page == 1) settings.widgetIds else emptyList()
                         if (pageWidgets.isNotEmpty()) {
                             LazyVerticalGrid(
@@ -626,12 +667,13 @@ fun HomeWorkspaceScreen(
 
             if (settings.showDock && localDock.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                val dockHighlighted = draggingPkg != null && activeDragRootPos.y >= dockTopY
+                val dockHighlighted = draggingPkg != null && activeDragRootPos.y >= dockTopY - 32f
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .onGloballyPositioned { coords ->
-                            dockTopY = coords.positionInRoot().y
+                            dockTopY = coords.boundsInRoot().top
+                            onDockTopReported(dockTopY)
                         }
                         .clip(karuiShape())
                         .background(palette.surface)
@@ -651,16 +693,13 @@ fun HomeWorkspaceScreen(
                                     dockItemRoot = coords.positionInRoot()
                                 }
                                 .graphicsLayer {
-                                    if (isDockDragging) {
-                                        translationX = dockDragX
-                                        scaleX = 1.08f
-                                        scaleY = 1.08f
-                                    }
+                                    alpha = if (isDockDragging) 0f else 1f
                                 }
                                 .pointerInput(app.packageName) {
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = { offset ->
                                             draggingDockPkg = app.packageName
+                                            activeDragApp = app
                                             dockDragX = 0f
                                             dockTotalDist = 0f
                                             dockSwapCount = 0
@@ -707,12 +746,14 @@ fun HomeWorkspaceScreen(
                                                 }
                                             }
                                             draggingDockPkg = null
+                                            activeDragApp = null
                                             dockDragX = 0f
                                             dockTotalDist = 0f
                                             dockSwapCount = 0
                                         },
                                         onDragCancel = {
                                             draggingDockPkg = null
+                                            activeDragApp = null
                                             dockDragX = 0f
                                             dockTotalDist = 0f
                                             dockSwapCount = 0
@@ -806,6 +847,29 @@ fun HomeWorkspaceScreen(
                         )
                     }
                 }
+            }
+        }
+
+        // Unclipped Floating Drag Overlay for Home & Dock icons
+        activeDragApp?.let { dragged ->
+            val ox = with(density) { (activeDragRootPos.x - 36.dp.toPx()).toDp() }
+            val oy = with(density) { (activeDragRootPos.y - 56.dp.toPx()).toDp() }
+            Box(
+                modifier = Modifier
+                    .offset(x = ox, y = oy)
+                    .zIndex(50f)
+                    .graphicsLayer { scaleX = 1.12f; scaleY = 1.12f }
+            ) {
+                KaruiAppTile(
+                    app = dragged,
+                    showLabel = false,
+                    monochrome = settings.monochromeIcons,
+                    hapticsEnabled = false,
+                    iconShape = settings.iconShape,
+                    iconSize = settings.iconSizeDp.dp,
+                    onClick = {},
+                    onLongClick = null
+                )
             }
         }
     }

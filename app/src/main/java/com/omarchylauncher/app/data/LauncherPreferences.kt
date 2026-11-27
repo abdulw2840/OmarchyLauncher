@@ -39,6 +39,7 @@ data class LauncherSettings(
     val drawerColumns: Int = 4,
     val drawerListMode: Boolean = false,
     val drawerBgAlpha: Float = 0.96f,
+    val showDrawerTabs: Boolean = true,
     val showAtAGlance: Boolean = true,
     val showSearchBar: Boolean = true,
     val showDock: Boolean = true,
@@ -85,6 +86,7 @@ class LauncherPreferences(private val context: Context) {
         val DRAWER_COLS = intPreferencesKey("drawer_cols")
         val DRAWER_LIST_MODE = booleanPreferencesKey("drawer_list_mode")
         val DRAWER_BG_ALPHA = floatPreferencesKey("drawer_bg_alpha")
+        val SHOW_DRAWER_TABS = booleanPreferencesKey("show_drawer_tabs")
         val SHOW_AT_A_GLANCE = booleanPreferencesKey("show_at_a_glance")
         val SHOW_SEARCH_BAR = booleanPreferencesKey("show_search_bar")
         val SHOW_DOCK = booleanPreferencesKey("show_dock")
@@ -138,6 +140,7 @@ class LauncherPreferences(private val context: Context) {
             drawerColumns = (p[Keys.DRAWER_COLS] ?: 4).coerceIn(3, 6),
             drawerListMode = p[Keys.DRAWER_LIST_MODE] ?: false,
             drawerBgAlpha = (p[Keys.DRAWER_BG_ALPHA] ?: 0.96f).coerceIn(0.4f, 1.0f),
+            showDrawerTabs = p[Keys.SHOW_DRAWER_TABS] ?: true,
             showAtAGlance = p[Keys.SHOW_AT_A_GLANCE] ?: true,
             showSearchBar = p[Keys.SHOW_SEARCH_BAR] ?: true,
             showDock = p[Keys.SHOW_DOCK] ?: true,
@@ -207,6 +210,7 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setDrawerColumns(value: Int) = context.dataStore.edit { it[Keys.DRAWER_COLS] = value.coerceIn(3, 6) }
     suspend fun setDrawerListMode(value: Boolean) = context.dataStore.edit { it[Keys.DRAWER_LIST_MODE] = value }
     suspend fun setDrawerBgAlpha(value: Float) = context.dataStore.edit { it[Keys.DRAWER_BG_ALPHA] = value.coerceIn(0.4f, 1.0f) }
+    suspend fun setShowDrawerTabs(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_DRAWER_TABS] = value }
     suspend fun setShowAtAGlance(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_AT_A_GLANCE] = value }
     suspend fun setShowSearchBar(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_SEARCH_BAR] = value }
     suspend fun setShowDock(value: Boolean) = context.dataStore.edit { it[Keys.SHOW_DOCK] = value }

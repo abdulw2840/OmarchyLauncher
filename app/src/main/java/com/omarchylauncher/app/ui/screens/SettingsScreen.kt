@@ -92,6 +92,7 @@ fun SettingsScreen(
     onSetDrawerColumns: (Int) -> Unit,
     onSetDrawerListMode: (Boolean) -> Unit,
     onSetDrawerBgAlpha: (Float) -> Unit,
+    onSetShowDrawerTabs: (Boolean) -> Unit,
     onSetShowDrawerLabels: (Boolean) -> Unit,
     onSetAutoFocusSearch: (Boolean) -> Unit,
     onSetWebSearchProvider: (WebSearchProvider) -> Unit,
@@ -309,6 +310,10 @@ fun SettingsScreen(
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
                             ToggleRow("Show Drawer Labels", "Display app names in grid view", settings.showDrawerLabels, onSetShowDrawerLabels)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            ToggleRow("Show Category Tabs", "All / User / System tabs at top of drawer", settings.showDrawerTabs, onSetShowDrawerTabs)
                             Spacer(modifier = Modifier.height(10.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
