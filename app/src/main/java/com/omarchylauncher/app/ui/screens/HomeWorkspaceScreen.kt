@@ -688,7 +688,7 @@ fun HomeWorkspaceScreen(
                 }
             }
 
-            if (hasWidgetsPage && totalPages > 1) {
+            if (totalPages > 1) {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
                     horizontalArrangement = Arrangement.Center,
@@ -757,7 +757,8 @@ fun HomeWorkspaceScreen(
 
             if (settings.showDock && localDock.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
-                val dockHighlighted = draggingPkg != null && activeDragRootPos.y >= dockTopY - 32f
+                val dragRootY = (homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos).y
+                val dockHighlighted = draggingPkg != null && dragRootY >= dockTopY - 32f
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
