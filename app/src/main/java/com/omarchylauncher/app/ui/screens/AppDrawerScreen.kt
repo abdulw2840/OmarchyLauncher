@@ -60,6 +60,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
@@ -457,6 +458,13 @@ fun AppDrawerScreen(
                 modifier = Modifier.weight(1f)
             ) { page ->
                 val cleanQuery = if (query.startsWith(":")) "" else query.trim()
+                val pageMotion = Modifier.graphicsLayer {
+                    val pageOffset = (pagerState.currentPage - page + pagerState.currentPageOffsetFraction)
+                    val distance = kotlin.math.abs(pageOffset).coerceIn(0f, 1f)
+                    scaleX = 1f - 0.025f * distance
+                    scaleY = 1f - 0.035f * distance
+                    alpha = 1f - 0.10f * distance
+                }
                 val pageApps = remember(apps, settings.hiddenPackages, cleanQuery, page) {
                     apps.filter { app ->
                         val isHidden = settings.hiddenPackages.contains(app.packageName)
@@ -474,7 +482,7 @@ fun AppDrawerScreen(
                 }
 
                 if (pageApps.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.fillMaxSize().then(pageMotion), contentAlignment = Alignment.Center) {
                         Text(
                             text = "NO APPS",
                             color = palette.gray,
@@ -491,7 +499,7 @@ fun AppDrawerScreen(
 
                     LazyColumn(
                         state = listStates[page],
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().then(pageMotion),
                         contentPadding = PaddingValues(
                             start = 16.dp,
                             end = 16.dp,
@@ -568,7 +576,7 @@ fun AppDrawerScreen(
                     LazyVerticalGrid(
                         state = gridStates[page],
                         columns = GridCells.Fixed(settings.drawerColumns),
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().then(pageMotion),
                         contentPadding = PaddingValues(
                             start = 12.dp,
                             end = 12.dp,
