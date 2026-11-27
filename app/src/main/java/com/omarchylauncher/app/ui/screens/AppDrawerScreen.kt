@@ -136,6 +136,7 @@ fun AppDrawerScreen(
     var showHiddenVault by remember { mutableStateOf(false) }
     var showDrawerMenu by remember { mutableStateOf(false) }
     var showFrozenDialog by remember { mutableStateOf(false) }
+    var isDraggingOut by remember { mutableStateOf(false) }
     var resolvedHiddenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
     var resolvedFrozenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
 
@@ -191,7 +192,7 @@ fun AppDrawerScreen(
                         totalDy += delta.y
 
                         val atTop = if (settings.drawerListMode) !listState.canScrollBackward else !gridState.canScrollBackward
-                        if (!triggered && atTop && totalDy > 105f && abs(totalDy) > abs(totalDx) * 1.35f) {
+                        if (!isDraggingOut && !triggered && atTop && totalDy > 105f && abs(totalDy) > abs(totalDx) * 1.35f) {
                             triggered = true
                             onClose()
                         }
@@ -545,10 +546,19 @@ fun AppDrawerScreen(
                                         onTap = { onLaunchApp(app) },
                                         onShowMenu = { onLongPressApp(app) },
                                         onDismissMenu = onDismissLongPressApp,
-                                        onDragStart = { onDragToHomeStart(app) },
+                                        onDragStart = {
+                                            isDraggingOut = true
+                                            onDragToHomeStart(app)
+                                        },
                                         onDrag = { onDragToHomeMove() },
-                                        onDragEnd = { onDragToHomeEnd(true) },
-                                        onDragCancel = { onDragToHomeEnd(false) }
+                                        onDragEnd = {
+                                            isDraggingOut = false
+                                            onDragToHomeEnd(true)
+                                        },
+                                        onDragCancel = {
+                                            isDraggingOut = false
+                                            onDragToHomeEnd(false)
+                                        }
                                     )
                             ) {
                                 KaruiAppTile(

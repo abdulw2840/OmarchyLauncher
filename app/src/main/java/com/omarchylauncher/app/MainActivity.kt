@@ -369,6 +369,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier
                                 .offset(x = offsetX, y = offsetY)
                                 .width(tileW)
+                                .zIndex(120f)
                                 .graphicsLayer { scaleX = 1.12f; scaleY = 1.12f }
                         ) {
                             KaruiAppTile(

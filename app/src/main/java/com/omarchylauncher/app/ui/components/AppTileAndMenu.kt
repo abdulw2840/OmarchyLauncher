@@ -135,11 +135,41 @@ fun Modifier.karuiAppHoldOrDrag(
                 return@awaitEachGesture
             }
 
-            // PRESSED -> LONG_PRESSED -> MENU_OPEN
+            // PRESSED -> LONG_PRESSED (haptic). Wait a short grace window before opening menu
+            // so users intending to drag don't get a menu flash.
             gestureState = IconGestureState.LONG_PRESSED
             haptic?.performHapticFeedback(HapticFeedbackType.LongPress)
-            gestureState = IconGestureState.MENU_OPEN
-            onShowMenu()
+
+            var releasedDuringGrace = false
+            withTimeoutOrNull(300L) {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val ch = event.changes.firstOrNull { it.id == downId }
+                    if (ch == null || !ch.pressed) {
+                        ch?.consume()
+                        releasedDuringGrace = true
+                        break
+                    }
+                    if ((ch.position - downPos).getDistance() > touchSlop) {
+                        gestureState = IconGestureState.DRAGGING
+                        onDragStart()
+                        ch.consume()
+                        break
+                    }
+                }
+            }
+
+            if (releasedDuringGrace) {
+                gestureState = IconGestureState.MENU_OPEN
+                onShowMenu()
+                onInteractionActiveChange(false)
+                return@awaitEachGesture
+            }
+
+            if (gestureState == IconGestureState.LONG_PRESSED) {
+                gestureState = IconGestureState.MENU_OPEN
+                onShowMenu()
+            }
 
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)

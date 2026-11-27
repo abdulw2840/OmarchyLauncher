@@ -297,6 +297,7 @@ fun KaruiSwitch(
             modifier = Modifier
                 .offset(x = thumbOffset, y = 5.dp)
                 .size(14.dp)
+                .clip(karuiShape())
                 .background(if (checked) palette.accentTxt else palette.gray)
         )
     }
