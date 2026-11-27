@@ -20,6 +20,7 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -55,6 +56,8 @@ data class IconPackInfo(
 class AppRepository(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Collapse bursts of package broadcasts/manual refresh requests into one scan.
+    private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
     private val launcherApps = context.getSystemService(LauncherApps::class.java)
     private val iconCache = android.util.LruCache<String, ImageBitmap>(256)
     private val iconMonoCache = android.util.LruCache<String, Boolean>(256)
@@ -82,13 +85,22 @@ class AppRepository(private val context: Context) {
     }
 
     init {
+        scope.launch {
+            for (ignored in refreshRequests) {
+                performRefresh()
+            }
+        }
         runCatching { launcherApps.registerCallback(callback) }
         refresh()
     }
 
     fun refresh() {
-        scope.launch {
-            _isLoading.value = true
+        refreshRequests.trySend(Unit)
+    }
+
+    private suspend fun performRefresh() {
+        _isLoading.value = true
+        try {
             val myPkg = context.packageName
             val activities = runCatching {
                 launcherApps.getActivityList(null, Process.myUserHandle())
@@ -101,9 +113,7 @@ class AppRepository(private val context: Context) {
                 .map { info ->
                     val isSystem = (info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
                     val rawDrawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
-                    val icon = runCatching {
-                        rawDrawable?.toBitmap(96, 96)?.asImageBitmap()
-                    }.getOrNull()
+                    val icon = runCatching { rawDrawable?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()
                     var monoIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         runCatching {
                             val adaptive = rawDrawable as? AdaptiveIconDrawable
@@ -112,13 +122,11 @@ class AppRepository(private val context: Context) {
                     } else null
                     if (monoIcon == null && themedPackMap.isNotEmpty()) {
                         val pkgName = info.applicationInfo.packageName
-                        val compKey = "$pkgName/${info.componentName.className}"
+                        val compKey = pkgName + "/" + info.componentName.className
                         val spec = themedPackMap[compKey] ?: themedPackMap[pkgName]
                         if (spec != null) {
                             val loaded = loadIconFromSpecWithMono(spec)
-                            if (loaded != null && loaded.second) {
-                                monoIcon = loaded.first
-                            }
+                            if (loaded != null && loaded.second) monoIcon = loaded.first
                         }
                     }
                     AppEntry(
@@ -131,10 +139,11 @@ class AppRepository(private val context: Context) {
                         monochromeIcon = monoIcon
                     )
                 }
-                .distinctBy { "${it.packageName}/${it.activityName}" }
+                .distinctBy { it.packageName + "/" + it.activityName }
                 .sortedBy { it.label.lowercase() }
 
             _apps.value = entries
+        } finally {
             _isLoading.value = false
         }
     }
