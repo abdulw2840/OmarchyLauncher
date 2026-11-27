@@ -70,6 +70,8 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import com.omarchylauncher.app.ui.components.karuiAppHoldOrDrag
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -106,6 +108,8 @@ fun AppDrawerScreen(
     focusSearchOnOpen: Boolean,
     contentPadding: PaddingValues,
     onClose: () -> Unit,
+    onCloseDragFraction: (Float) -> Unit = {},
+    onCloseDragSettle: (Boolean) -> Unit = {},
     onLaunchApp: (AppEntry) -> Unit,
     onLongPressApp: (AppEntry) -> Unit,
     onDismissLongPressApp: () -> Unit,
@@ -126,6 +130,8 @@ fun AppDrawerScreen(
     val scale = LocalUiScale.current
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
     var query by remember { mutableStateOf("") }
     val tabs = if (settings.showDrawerTabs) listOf("all", "user", "system") else emptyList()
@@ -169,33 +175,58 @@ fun AppDrawerScreen(
         } else null
     }
 
+    // [EXP-DRAWER-SWIPE] Gradual finger-driven swipe-down close on AppDrawerScreen
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.bg.copy(alpha = settings.drawerBgAlpha))
             .pointerInput(settings.drawerListMode) {
+                val touchSlop = viewConfiguration.touchSlop
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                     var totalDx = 0f
                     var totalDy = 0f
+                    var lastDy = 0f
                     var lastPos = down.position
-                    var triggered = false
+                    var pullingToClose = false
+                    var lastFrac = 1f
 
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!change.pressed) break
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            if (!change.pressed) {
+                                if (pullingToClose) {
+                                    val keepOpen = lastDy <= 4f && lastFrac > 0.72f
+                                    onCloseDragSettle(keepOpen)
+                                }
+                                break
+                            }
 
-                        val delta = change.position - lastPos
-                        lastPos = change.position
-                        totalDx += delta.x
-                        totalDy += delta.y
+                            val delta = change.position - lastPos
+                            lastPos = change.position
+                            lastDy = delta.y
+                            totalDx += delta.x
+                            totalDy += delta.y
 
-                        val atTop = if (settings.drawerListMode) !listState.canScrollBackward else !gridState.canScrollBackward
-                        if (!isDraggingOut && !triggered && atTop && totalDy > 105f && abs(totalDy) > abs(totalDx) * 1.35f) {
-                            triggered = true
-                            onClose()
+                            val atTop = if (settings.drawerListMode) !listState.canScrollBackward else !gridState.canScrollBackward
+                            if (!isDraggingOut && !pullingToClose && atTop && totalDy > touchSlop * 2f && abs(totalDy) > abs(totalDx) * 1.4f) {
+                                pullingToClose = true
+                            }
+                            if (pullingToClose) {
+                                if (isDraggingOut) {
+                                    pullingToClose = false
+                                    onCloseDragFraction(1f)
+                                } else {
+                                    change.consume()
+                                    val frac = (1f - (totalDy - touchSlop * 2f) / (screenHeightPx * 0.36f)).coerceIn(0f, 1f)
+                                    lastFrac = frac
+                                    onCloseDragFraction(frac)
+                                }
+                            }
                         }
+                    } catch (_: Throwable) {
+                        if (pullingToClose) onCloseDragSettle(true)
                     }
                 }
             }

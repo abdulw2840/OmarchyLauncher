@@ -12,14 +12,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -63,7 +59,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -91,6 +89,7 @@ import com.omarchylauncher.app.ui.components.KaruiButton
 import com.omarchylauncher.app.ui.components.KaruiChip
 import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
+import com.omarchylauncher.app.ui.components.OmarchyAppWidgetHost
 import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.screens.AppDrawerScreen
 import com.omarchylauncher.app.ui.screens.HomeWorkspaceScreen
@@ -180,7 +179,8 @@ class MainActivity : ComponentActivity() {
         }
 
         appWidgetManager = AppWidgetManager.getInstance(this)
-        appWidgetHost = AppWidgetHost(this, 1024)
+        // [EXP-WIDGET-LONGPRESS] Use OmarchyAppWidgetHost so holding anywhere on a widget opens customization
+        appWidgetHost = OmarchyAppWidgetHost(this, 1024)
 
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -192,7 +192,9 @@ class MainActivity : ComponentActivity() {
             val pinnedHomeSlots by viewModel.pinnedHomeSlots.collectAsStateWithLifecycle()
             val dockApps by viewModel.dockApps.collectAsStateWithLifecycle()
 
-            var drawerOpen by remember { mutableStateOf(false) }
+            // [EXP-DRAWER-SWIPE] Continuous 0f..1f progress for gradual finger-driven drawer & home transition
+            val drawerProgress = remember { Animatable(0f) }
+            val drawerScope = rememberCoroutineScope()
             var focusDrawerSearch by remember { mutableStateOf(false) }
             var contextApp by remember { mutableStateOf<AppEntry?>(null) }
             var editingApp by remember { mutableStateOf<AppEntry?>(null) }
@@ -203,13 +205,24 @@ class MainActivity : ComponentActivity() {
             var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
             var latestRootPointer by remember { mutableStateOf(Offset.Zero) }
             var dockTopY by remember { mutableStateOf(Float.MAX_VALUE) }
+            var homeDropSlotResolver by remember { mutableStateOf<(Offset) -> Int?> { { null } } }
 
-            LaunchedEffect(homeResetSignal) {
-                if (homeResetSignal > 0) drawerOpen = false
+            fun setDrawerOpenAnimated(open: Boolean, focusSearch: Boolean = false) {
+                focusDrawerSearch = if (open) focusSearch else false
+                drawerScope.launch {
+                    drawerProgress.animateTo(
+                        targetValue = if (open) 1f else 0f,
+                        animationSpec = spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessMediumLow)
+                    )
+                }
             }
 
-            BackHandler(enabled = drawerOpen) {
-                drawerOpen = false
+            LaunchedEffect(homeResetSignal) {
+                if (homeResetSignal > 0) setDrawerOpenAnimated(false)
+            }
+
+            BackHandler(enabled = drawerProgress.value > 0.05f) {
+                setDrawerOpenAnimated(false)
             }
 
             OmarchyTheme(
@@ -245,120 +258,154 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                 ) {
-                    HomeWorkspaceScreen(
-                        settings = settings,
-                        clockState = clockState,
-                        isWeatherRefreshing = isWeatherRefreshing,
-                        pinnedSlots = pinnedHomeSlots,
-                        dockApps = dockApps,
-                        appWidgetHost = appWidgetHost,
-                        appWidgetManager = appWidgetManager,
-                        homeResetSignal = homeResetSignal,
-                        externalDragActive = draggingDrawerApp != null,
-                        externalDragPos = draggingDrawerPos,
-                        externalDragIsSystem = draggingDrawerApp?.isSystem == true,
-                        onDockTopReported = { dockTopY = it },
-                        contentPadding = insets,
-                        onOpenDrawer = { focusSearch ->
-                            focusDrawerSearch = focusSearch
-                            drawerOpen = true
-                        },
-                        onOpenSettings = viewModel::openSettings,
-                        onOpenWallpaper = viewModel::openWallpaperPicker,
-                        onAddWidget = { showWidgetPicker = true },
-                        onRemoveWidget = { id ->
-                            appWidgetHost.deleteAppWidgetId(id)
-                            viewModel.removeWidgetId(id)
-                        },
-                        onResizeWidget = viewModel::setWidgetHeight,
-                        onSetWidgetHalfWidth = viewModel::setWidgetHalfWidth,
-                        onReorderWidgets = viewModel::setWidgetOrder,
-                        onAddPage = { viewModel.setExtraPagesCount(settings.extraPagesCount + 1) },
-                        onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
-                        onSavePinnedSlots = viewModel::setPinnedHomeSlots,
-                        onSaveDockOrder = viewModel::setDockPackages,
-                        onMoveHomeToDock = viewModel::moveHomeToDock,
-                        onRemoveHomeApp = viewModel::removePinnedHome,
-                        onRemoveDockApp = viewModel::toggleDockPackage,
-                        onUninstallApp = { pkg -> viewModel.uninstallApp(pkg, useRoot = false) },
-                        onLockScreen = viewModel::lockScreen,
-                        onExpandNotifications = viewModel::expandNotifications,
-                        onRefreshWeather = { viewModel.refreshWeather(silent = false) },
-                        onSetWeatherCity = viewModel::setWeatherLocation,
-                        onLaunchApp = viewModel::launchApp,
-                        onLongPressApp = { contextApp = it },
-                        onDismissLongPressApp = { contextApp = null }
-                    )
-
                     val density = LocalDensity.current
                     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+                    val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
                     val topDropLimitPx = with(density) { (insets.calculateTopPadding() + 86.dp).toPx() }
 
-                    AnimatedVisibility(
-                        visible = drawerOpen,
-                        enter = slideInVertically(spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow)) { it / 4 } + fadeIn(tween(180)),
-                        exit = slideOutVertically(tween(170)) { it / 4 } + fadeOut(tween(140)),
-                        modifier = Modifier.graphicsLayer {
-                            alpha = if (draggingDrawerApp != null) 0f else 1f
-                        }
+                    // [EXP-DRAWER-SWIPE] Smoothly scale & fade Home Screen behind the interactive App Drawer
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                val p = if (draggingDrawerApp != null) 0f else drawerProgress.value
+                                val s = 1f - 0.08f * p
+                                scaleX = s
+                                scaleY = s
+                                alpha = (1f - 0.55f * p).coerceIn(0f, 1f)
+                                translationY = -28.dp.toPx() * p
+                            }
                     ) {
-                        AppDrawerScreen(
-                            apps = apps,
-                            isLoading = isLoadingApps,
+                        HomeWorkspaceScreen(
                             settings = settings,
-                            focusSearchOnOpen = focusDrawerSearch,
+                            clockState = clockState,
+                            isWeatherRefreshing = isWeatherRefreshing,
+                            pinnedSlots = pinnedHomeSlots,
+                            dockApps = dockApps,
+                            appWidgetHost = appWidgetHost,
+                            appWidgetManager = appWidgetManager,
+                            homeResetSignal = homeResetSignal,
+                            externalDragActive = draggingDrawerApp != null,
+                            externalDragPos = draggingDrawerPos,
+                            externalDragIsSystem = draggingDrawerApp?.isSystem == true,
+                            externalDragPkg = draggingDrawerApp?.packageName,
+                            onDockTopReported = { dockTopY = it },
+                            onRegisterDropSlotResolver = { homeDropSlotResolver = it },
+                            onDrawerDragFraction = { frac ->
+                                drawerScope.launch { drawerProgress.snapTo(frac) }
+                            },
+                            onDrawerDragSettle = { open, focusSearch ->
+                                setDrawerOpenAnimated(open, focusSearch)
+                            },
                             contentPadding = insets,
-                            onClose = { drawerOpen = false },
-                            onLaunchApp = {
-                                drawerOpen = false
-                                viewModel.launchApp(it)
+                            onOpenDrawer = { focusSearch ->
+                                setDrawerOpenAnimated(true, focusSearch)
                             },
-                            onLongPressApp = { contextApp = it },
-                            onDismissLongPressApp = { contextApp = null },
-                            onToggleListMode = viewModel::setDrawerListMode,
                             onOpenSettings = viewModel::openSettings,
+                            onOpenWallpaper = viewModel::openWallpaperPicker,
+                            onAddWidget = { showWidgetPicker = true },
+                            onRemoveWidget = { id ->
+                                appWidgetHost.deleteAppWidgetId(id)
+                                viewModel.removeWidgetId(id)
+                            },
+                            onResizeWidget = viewModel::setWidgetHeight,
+                            onSetWidgetHalfWidth = viewModel::setWidgetHalfWidth,
+                            onReorderWidgets = viewModel::setWidgetOrder,
+                            onAddPage = { viewModel.setExtraPagesCount(settings.extraPagesCount + 1) },
+                            onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
+                            onSavePinnedSlots = viewModel::setPinnedHomeSlots,
+                            onSaveDockOrder = viewModel::setDockPackages,
+                            onMoveHomeToDock = viewModel::moveHomeToDock,
+                            onRemoveHomeApp = viewModel::removePinnedHome,
+                            onRemoveDockApp = viewModel::toggleDockPackage,
+                            onUninstallApp = { pkg -> viewModel.uninstallApp(pkg, useRoot = false) },
                             onLockScreen = viewModel::lockScreen,
-                            onRefreshApps = viewModel::refreshApps,
-                            onSearchWeb = viewModel::searchWeb,
-                            onResolveHiddenApps = viewModel::getHiddenAppDetails,
-                            onLaunchHiddenApp = { pkg ->
-                                drawerOpen = false
-                                viewModel.launchHiddenApp(pkg)
-                            },
-                            onUnhideApp = viewModel::toggleHiddenPackage,
-                            onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) },
-                            onDragToHomeStart = { app ->
-                                draggingDrawerApp = app
-                                draggingDrawerPos = latestRootPointer
-                            },
-                            onDragToHomeMove = {
-                                draggingDrawerPos = latestRootPointer
-                            },
-                            onDragToHomeEnd = { commit ->
-                                val dropped = draggingDrawerApp
-                                val dropY = draggingDrawerPos.y
-                                val dropX = draggingDrawerPos.x
-                                draggingDrawerApp = null
-                                if (commit && dropped != null) {
-                                    drawerOpen = false
-                                    when {
-                                        dropY < topDropLimitPx -> {
-                                            if (!dropped.isSystem && dropX >= screenWidthPx / 2f) {
-                                                viewModel.uninstallApp(dropped.packageName, useRoot = false)
-                                            } else {
-                                                viewModel.removePinnedHome(dropped.packageName)
+                            onExpandNotifications = viewModel::expandNotifications,
+                            onRefreshWeather = { viewModel.refreshWeather(silent = false) },
+                            onSetWeatherCity = viewModel::setWeatherLocation,
+                            onLaunchApp = viewModel::launchApp,
+                            onLongPressApp = { contextApp = it },
+                            onDismissLongPressApp = { contextApp = null }
+                        )
+                    }
+
+                    if (drawerProgress.value > 0.005f || draggingDrawerApp != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer {
+                                    val p = drawerProgress.value.coerceIn(0f, 1f)
+                                    translationY = (1f - p) * screenHeightPx * 0.42f
+                                    alpha = if (draggingDrawerApp != null) 0f else (p * 1.15f).coerceIn(0f, 1f)
+                                }
+                        ) {
+                            AppDrawerScreen(
+                                apps = apps,
+                                isLoading = isLoadingApps,
+                                settings = settings,
+                                focusSearchOnOpen = focusDrawerSearch,
+                                contentPadding = insets,
+                                onClose = { setDrawerOpenAnimated(false) },
+                                onCloseDragFraction = { frac ->
+                                    drawerScope.launch { drawerProgress.snapTo(frac) }
+                                },
+                                onCloseDragSettle = { open ->
+                                    setDrawerOpenAnimated(open)
+                                },
+                                onLaunchApp = {
+                                    setDrawerOpenAnimated(false)
+                                    viewModel.launchApp(it)
+                                },
+                                onLongPressApp = { contextApp = it },
+                                onDismissLongPressApp = { contextApp = null },
+                                onToggleListMode = viewModel::setDrawerListMode,
+                                onOpenSettings = viewModel::openSettings,
+                                onLockScreen = viewModel::lockScreen,
+                                onRefreshApps = viewModel::refreshApps,
+                                onSearchWeb = viewModel::searchWeb,
+                                onResolveHiddenApps = viewModel::getHiddenAppDetails,
+                                onLaunchHiddenApp = { pkg ->
+                                    setDrawerOpenAnimated(false)
+                                    viewModel.launchHiddenApp(pkg)
+                                },
+                                onUnhideApp = viewModel::toggleHiddenPackage,
+                                onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) },
+                                onDragToHomeStart = { app ->
+                                    draggingDrawerApp = app
+                                    draggingDrawerPos = latestRootPointer
+                                },
+                                onDragToHomeMove = {
+                                    draggingDrawerPos = latestRootPointer
+                                },
+                                onDragToHomeEnd = { commit ->
+                                    val dropped = draggingDrawerApp
+                                    val dropY = draggingDrawerPos.y
+                                    val dropX = draggingDrawerPos.x
+                                    val dropPos = draggingDrawerPos
+                                    draggingDrawerApp = null
+                                    if (commit && dropped != null) {
+                                        // [EXP-DRAWER-DROP-SLOT] Drop into exact empty Home grid slot near finger
+                                        val slotIndex = homeDropSlotResolver(dropPos)
+                                        drawerScope.launch { drawerProgress.snapTo(0f) }
+                                        when {
+                                            dropY < topDropLimitPx -> {
+                                                if (!dropped.isSystem && dropX >= screenWidthPx / 2f) {
+                                                    viewModel.uninstallApp(dropped.packageName, useRoot = false)
+                                                } else {
+                                                    viewModel.removePinnedHome(dropped.packageName)
+                                                }
                                             }
-                                        }
-                                        settings.showDock && dropY >= dockTopY - 32f -> {
-                                            viewModel.addDockPackage(dropped.packageName)
-                                        }
-                                        else -> {
-                                            viewModel.addPinnedHomeAt(dropped.packageName)
+                                            settings.showDock && dropY >= dockTopY - 32f -> {
+                                                viewModel.addDockPackage(dropped.packageName)
+                                            }
+                                            else -> {
+                                                viewModel.addPinnedHomeAt(dropped.packageName, slotIndex)
+                                            }
                                         }
                                     }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
 
                     draggingDrawerApp?.let { dragged ->
