@@ -40,7 +40,8 @@ class SettingsActivity : ComponentActivity() {
 
             OmarchyTheme(
                 themeName = settings.themeName,
-                uiScale = settings.uiScale
+                uiScale = settings.uiScale,
+                cornerRadiusDp = settings.cornerRadiusDp
             ) {
                 SettingsScreen(
                     settings = settings,
@@ -65,6 +66,7 @@ class SettingsActivity : ComponentActivity() {
                     onSetShowHomeLabels = viewModel::setShowHomeLabels,
                     onSetMonochromeIcons = viewModel::setMonochromeIcons,
                     onSetIconShape = viewModel::setIconShape,
+                    onSetIconSizeDp = viewModel::setIconSizeDp,
                     onSetShowSteps = viewModel::setShowSteps,
                     onSetShowScreenTime = viewModel::setShowScreenTime,
                     onSetDrawerColumns = viewModel::setDrawerColumns,
@@ -79,7 +81,8 @@ class SettingsActivity : ComponentActivity() {
                     onSetThemeName = viewModel::setThemeName,
                     onSetSolidBg = viewModel::setSolidBackground,
                     onSetWallpaperDim = viewModel::setWallpaperDimAlpha,
-                    onSetUiScale = viewModel::setUiScale
+                    onSetUiScale = viewModel::setUiScale,
+                    onSetCornerRadiusDp = viewModel::setCornerRadiusDp
                 )
             }
         }

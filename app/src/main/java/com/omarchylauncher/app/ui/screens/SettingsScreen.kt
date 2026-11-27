@@ -29,12 +29,15 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,6 +52,7 @@ import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiPivotHeader
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
 import com.omarchylauncher.app.ui.components.KaruiSwitch
+import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.theme.KaruiThemes
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
@@ -73,6 +77,7 @@ fun SettingsScreen(
     onSetShowHomeLabels: (Boolean) -> Unit,
     onSetMonochromeIcons: (Boolean) -> Unit,
     onSetIconShape: (IconShape) -> Unit,
+    onSetIconSizeDp: (Int) -> Unit,
     onSetShowSteps: (Boolean) -> Unit,
     onSetShowScreenTime: (Boolean) -> Unit,
     onSetDrawerColumns: (Int) -> Unit,
@@ -87,7 +92,8 @@ fun SettingsScreen(
     onSetThemeName: (String) -> Unit,
     onSetSolidBg: (Boolean) -> Unit,
     onSetWallpaperDim: (Float) -> Unit,
-    onSetUiScale: (Float) -> Unit
+    onSetUiScale: (Float) -> Unit,
+    onSetCornerRadiusDp: (Int) -> Unit
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
@@ -260,6 +266,16 @@ fun SettingsScreen(
                                     KaruiChip(shape.label, settings.iconShape == shape, { onSetIconShape(shape) }, Modifier.weight(1f))
                                 }
                             }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("ICON SIZE", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                listOf("S" to 36, "M" to 44, "L" to 52, "XL" to 60).forEach { (lbl, dpVal) ->
+                                    KaruiChip(lbl, settings.iconSizeDp == dpVal, { onSetIconSizeDp(dpVal) }, Modifier.weight(1f))
+                                }
+                            }
                         }
                     }
                 }
@@ -298,28 +314,88 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
-                            var pinDraft by remember(settings.hiddenPin) { mutableStateOf(settings.hiddenPin) }
-                            Text("HIDDEN VAULT PIN (4-6 DIGITS)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
-                            Spacer(modifier = Modifier.height(6.dp))
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .background(palette.surface)
-                                        .border(2.dp, palette.border, RectangleShape)
-                                        .padding(10.dp)
-                                ) {
-                                    BasicTextField(
-                                        value = pinDraft,
-                                        onValueChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) pinDraft = it },
-                                        singleLine = true,
-                                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
-                                        cursorBrush = SolidColor(palette.accent),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
+                            var pinVerified by remember(settings.hiddenPin) { mutableStateOf(settings.hiddenPin.isEmpty()) }
+                            var verifyInput by remember { mutableStateOf("") }
+                            var verifyErr by remember { mutableStateOf(false) }
+                            var newPinDraft by remember { mutableStateOf("") }
+
+                            Text("HIDDEN APPS SECURITY", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Warning: When using Root, hidden apps are disabled system-wide (pm hide) and will not run in background or send notifications until unhidden.",
+                                color = palette.gray,
+                                fontSize = (11 * scale).sp
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            if (!pinVerified) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(karuiShape())
+                                            .background(palette.surface)
+                                            .border(2.dp, palette.border, karuiShape())
+                                            .padding(10.dp)
+                                    ) {
+                                        if (verifyInput.isEmpty()) {
+                                            Text("Enter current PIN to change", color = palette.gray, fontSize = 12.sp)
+                                        }
+                                        BasicTextField(
+                                            value = verifyInput,
+                                            onValueChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) { verifyInput = it; verifyErr = false } },
+                                            singleLine = true,
+                                            visualTransformation = PasswordVisualTransformation(),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                            textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                            cursorBrush = SolidColor(palette.accent),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    KaruiSubtleButton("Verify", {
+                                        if (verifyInput == settings.hiddenPin) {
+                                            pinVerified = true
+                                            verifyInput = ""
+                                        } else {
+                                            verifyErr = true
+                                        }
+                                    })
                                 }
-                                KaruiSubtleButton("Set PIN", { if (pinDraft.length in 4..6) onSetHiddenPin(pinDraft) })
+                                if (verifyErr) {
+                                    Spacer(Modifier.height(4.dp))
+                                    Text("Incorrect PIN", color = Color(0xFFEF5350), fontSize = 11.sp)
+                                }
+                            } else {
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clip(karuiShape())
+                                            .background(palette.surface)
+                                            .border(2.dp, palette.border, karuiShape())
+                                            .padding(10.dp)
+                                    ) {
+                                        if (newPinDraft.isEmpty()) {
+                                            Text("New 4-6 digit PIN", color = palette.gray, fontSize = 12.sp)
+                                        }
+                                        BasicTextField(
+                                            value = newPinDraft,
+                                            onValueChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) newPinDraft = it },
+                                            singleLine = true,
+                                            visualTransformation = PasswordVisualTransformation(),
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                                            textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                            cursorBrush = SolidColor(palette.accent),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    KaruiSubtleButton("Set PIN", {
+                                        if (newPinDraft.length in 4..6) {
+                                            onSetHiddenPin(newPinDraft)
+                                            newPinDraft = ""
+                                        }
+                                    })
+                                }
                             }
                         }
                     }
@@ -352,6 +428,20 @@ fun SettingsScreen(
                                     KaruiChip(lbl, abs(settings.uiScale - v) < 0.03f, { onSetUiScale(v) }, Modifier.weight(1f))
                                 }
                             }
+                            Spacer(modifier = Modifier.height(12.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text("CORNER ROUNDNESS (${settings.cornerRadiusDp}dp)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Slider(
+                                value = settings.cornerRadiusDp.toFloat(),
+                                onValueChange = { onSetCornerRadiusDp(it.toInt()) },
+                                valueRange = 0f..24f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = palette.accent,
+                                    activeTrackColor = palette.accent,
+                                    inactiveTrackColor = palette.surface
+                                )
+                            )
                         }
                     }
                     item {

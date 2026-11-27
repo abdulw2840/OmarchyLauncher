@@ -176,7 +176,8 @@ class MainActivity : ComponentActivity() {
 
             OmarchyTheme(
                 themeName = settings.themeName,
-                uiScale = settings.uiScale
+                uiScale = settings.uiScale,
+                cornerRadiusDp = settings.cornerRadiusDp
             ) {
                 val palette = LocalKaruiPalette.current
                 val bgColor = if (settings.solidBackground) {
@@ -284,7 +285,9 @@ class MainActivity : ComponentActivity() {
                             onOpenInfo = { viewModel.openAppInfo(target) },
                             onForceStop = { viewModel.forceStopApp(target.packageName) },
                             onFreeze = { viewModel.freezeApp(target.packageName, true) },
-                            onUninstall = { useRoot -> viewModel.uninstallApp(target.packageName, useRoot) }
+                            onUninstall = { useRoot -> viewModel.uninstallApp(target.packageName, useRoot) },
+                            onMoveLeft = { viewModel.movePinnedHome(target.packageName, -1) },
+                            onMoveRight = { viewModel.movePinnedHome(target.packageName, 1) }
                         )
                     }
 
@@ -313,6 +316,14 @@ class MainActivity : ComponentActivity() {
                                     color = palette.gray,
                                     fontSize = 12.sp
                                 )
+                                if (privilegeStatus.isRootAvailable) {
+                                    Spacer(Modifier.height(6.dp))
+                                    Text(
+                                        text = "Warning: Root hiding (pm hide) disables the app system-wide — it will not run in background or send notifications until unhidden.",
+                                        color = Color(0xFFFFB000),
+                                        fontSize = 11.sp
+                                    )
+                                }
                                 Spacer(Modifier.height(10.dp))
                                 Box(
                                     modifier = Modifier

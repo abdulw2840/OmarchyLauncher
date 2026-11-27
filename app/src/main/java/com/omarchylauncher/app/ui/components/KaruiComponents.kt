@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
@@ -29,19 +30,24 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omarchylauncher.app.ui.theme.LocalCornerRadius
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
+
+@Composable
+fun karuiShape(): Shape = RoundedCornerShape(LocalCornerRadius.current.dp)
 
 @Composable
 fun KaruiBox(
@@ -61,8 +67,9 @@ fun KaruiBox(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(karuiShape())
                 .background(palette.bg)
-                .border(2.dp, palette.border, RectangleShape)
+                .border(2.dp, palette.border, karuiShape())
                 .padding(
                     top = (contentPadding + 4.dp) * scale,
                     start = contentPadding * scale,
@@ -182,7 +189,7 @@ fun KaruiButton(
     Button(
         onClick = onClick,
         enabled = enabled,
-        shape = RectangleShape,
+        shape = karuiShape(),
         colors = ButtonDefaults.buttonColors(
             containerColor = containerColor ?: palette.accent,
             contentColor = contentColor ?: palette.accentTxt,
@@ -217,8 +224,9 @@ fun KaruiSubtleButton(
 
     Box(
         modifier = modifier
+            .clip(karuiShape())
             .background(palette.surface)
-            .border(2.dp, palette.border, RectangleShape)
+            .border(2.dp, palette.border, karuiShape())
             .clickable(enabled = enabled) { onClick() }
             .padding(horizontal = (12 * scale).dp, vertical = (9 * scale).dp),
         contentAlignment = Alignment.Center
@@ -246,8 +254,9 @@ fun KaruiChip(
 
     Box(
         modifier = modifier
+            .clip(karuiShape())
             .background(if (selected) palette.accent else palette.bg)
-            .border(2.dp, palette.border, RectangleShape)
+            .border(2.dp, palette.border, karuiShape())
             .clickable { onClick() }
             .padding(horizontal = (12 * scale).dp, vertical = (7 * scale).dp),
         contentAlignment = Alignment.Center
@@ -279,8 +288,9 @@ fun KaruiSwitch(
     Box(
         modifier = modifier
             .size(width = 44.dp, height = 24.dp)
+            .clip(karuiShape())
             .background(if (checked) palette.accent else palette.surface)
-            .border(2.dp, palette.border, RectangleShape)
+            .border(2.dp, palette.border, karuiShape())
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
     ) {
         Box(

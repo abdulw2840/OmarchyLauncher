@@ -85,6 +85,7 @@ import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiPivotHeader
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
 import com.omarchylauncher.app.ui.components.iconShapeToComposeShape
+import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
 import kotlinx.coroutines.launch
@@ -505,6 +506,7 @@ fun AppDrawerScreen(
                                 monochrome = settings.monochromeIcons,
                                 hapticsEnabled = settings.hapticFeedback,
                                 iconShape = settings.iconShape,
+                                iconSize = settings.iconSizeDp.dp,
                                 onClick = { onLaunchApp(app) },
                                 onLongClick = { onLongPressApp(app) }
                             )

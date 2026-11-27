@@ -65,22 +65,24 @@ fun findKaruiPalette(key: String): KaruiPalette =
 
 val LocalKaruiPalette = staticCompositionLocalOf { KaruiThemes.first() }
 val LocalUiScale = staticCompositionLocalOf { 1.0f }
-
-private val KaruiShapes = Shapes(
-    extraSmall = RoundedCornerShape(0.dp),
-    small = RoundedCornerShape(0.dp),
-    medium = RoundedCornerShape(0.dp),
-    large = RoundedCornerShape(0.dp),
-    extraLarge = RoundedCornerShape(0.dp)
-)
+val LocalCornerRadius = staticCompositionLocalOf { 0 }
 
 @Composable
 fun OmarchyTheme(
     themeName: String = "tokyo-night",
     uiScale: Float = 1.0f,
+    cornerRadiusDp: Int = 0,
     content: @Composable () -> Unit
 ) {
     val palette = findKaruiPalette(themeName)
+    val radius = cornerRadiusDp.coerceIn(0, 24)
+    val dynamicShapes = Shapes(
+        extraSmall = RoundedCornerShape(radius.dp),
+        small = RoundedCornerShape(radius.dp),
+        medium = RoundedCornerShape(radius.dp),
+        large = RoundedCornerShape(radius.dp),
+        extraLarge = RoundedCornerShape(radius.dp)
+    )
 
     val colorScheme = if (palette.isDark) {
         darkColorScheme(
@@ -141,11 +143,12 @@ fun OmarchyTheme(
     CompositionLocalProvider(
         LocalKaruiPalette provides palette,
         LocalUiScale provides uiScale,
+        LocalCornerRadius provides radius,
         LocalContentColor provides palette.text
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
-            shapes = KaruiShapes
+            shapes = dynamicShapes
         ) {
             CompositionLocalProvider(LocalContentColor provides palette.text) {
                 content()

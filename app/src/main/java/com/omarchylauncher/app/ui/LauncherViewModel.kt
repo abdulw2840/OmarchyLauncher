@@ -411,6 +411,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     // Preference mutators
     fun setThemeName(v: String) = viewModelScope.launch { app.preferences.setThemeName(v) }
     fun setUiScale(v: Float) = viewModelScope.launch { app.preferences.setUiScale(v) }
+    fun setCornerRadiusDp(v: Int) = viewModelScope.launch { app.preferences.setCornerRadiusDp(v) }
+    fun setIconSizeDp(v: Int) = viewModelScope.launch { app.preferences.setIconSizeDp(v) }
+    fun movePinnedHome(pkg: String, delta: Int) = viewModelScope.launch { app.preferences.movePinnedHome(pkg, delta) }
     fun setSolidBackground(v: Boolean) = viewModelScope.launch { app.preferences.setSolidBackground(v) }
     fun setWallpaperDimAlpha(v: Float) = viewModelScope.launch { app.preferences.setWallpaperDimAlpha(v) }
     fun setGridColumns(v: Int) = viewModelScope.launch { app.preferences.setGridColumns(v) }

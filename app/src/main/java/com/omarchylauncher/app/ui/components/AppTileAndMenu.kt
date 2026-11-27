@@ -146,7 +146,9 @@ fun KaruiAppContextDialog(
     onOpenInfo: () -> Unit,
     onForceStop: () -> Unit,
     onFreeze: () -> Unit,
-    onUninstall: (useRoot: Boolean) -> Unit
+    onUninstall: (useRoot: Boolean) -> Unit,
+    onMoveLeft: (() -> Unit)? = null,
+    onMoveRight: (() -> Unit)? = null
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
@@ -155,8 +157,9 @@ fun KaruiAppContextDialog(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .clip(karuiShape())
                 .background(palette.surface)
-                .border(2.dp, palette.border, RectangleShape)
+                .border(2.dp, palette.border, karuiShape())
                 .padding(14.dp)
         ) {
             Text(
@@ -216,6 +219,25 @@ fun KaruiAppContextDialog(
                     onClick = { onToggleDock(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            if (isPinnedHome && onMoveLeft != null && onMoveRight != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MenuActionButton(
+                        label = "← Move Left",
+                        onClick = { onMoveLeft(); onDismiss() },
+                        modifier = Modifier.weight(1f)
+                    )
+                    MenuActionButton(
+                        label = "Move Right →",
+                        onClick = { onMoveRight(); onDismiss() },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(6.dp))
@@ -290,8 +312,9 @@ private fun MenuActionButton(
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .clip(karuiShape())
             .background(palette.bg)
-            .border(2.dp, palette.border, RectangleShape)
+            .border(2.dp, palette.border, karuiShape())
             .clickable { onClick() }
             .padding(vertical = 9.dp, horizontal = 8.dp),
         contentAlignment = Alignment.Center

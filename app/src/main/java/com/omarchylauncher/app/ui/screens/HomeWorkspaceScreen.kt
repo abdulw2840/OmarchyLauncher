@@ -3,9 +3,11 @@ package com.omarchylauncher.app.ui.screens
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.text.format.DateFormat
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -47,8 +49,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +71,7 @@ import com.omarchylauncher.app.ui.components.KaruiBox
 import com.omarchylauncher.app.ui.components.KaruiButton
 import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
+import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
 import kotlinx.coroutines.launch
@@ -75,6 +79,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.absoluteValue
 
 @Composable
 fun HomeWorkspaceScreen(
@@ -108,6 +113,7 @@ fun HomeWorkspaceScreen(
 
     var showHomeMenu by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
+    var widgetToRemove by remember { mutableStateOf<Int?>(null) }
     val gridState = rememberLazyGridState()
 
     val hasWidgetsPage = settings.widgetIds.isNotEmpty() || settings.extraPagesCount > 0
@@ -179,8 +185,22 @@ fun HomeWorkspaceScreen(
         Column(modifier = Modifier.fillMaxSize()) {
             HorizontalPager(
                 state = pagerState,
+                pageSpacing = 20.dp,
                 modifier = Modifier.weight(1f)
             ) { page ->
+                val pageOffset = ((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).absoluteValue.coerceIn(0f, 1f)
+                val pageScale = 1f - (pageOffset * 0.06f)
+                val pageAlpha = 1f - (pageOffset * 0.35f)
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            scaleX = pageScale
+                            scaleY = pageScale
+                            alpha = pageAlpha
+                        }
+                ) {
                 if (page == 0) {
                     // Default Home Screen
                     Column(modifier = Modifier.fillMaxSize()) {
@@ -319,6 +339,7 @@ fun HomeWorkspaceScreen(
                                             monochrome = settings.monochromeIcons,
                                             hapticsEnabled = settings.hapticFeedback,
                                             iconShape = settings.iconShape,
+                                            iconSize = settings.iconSizeDp.dp,
                                             onClick = { onLaunchApp(app) },
                                             onLongClick = { onLongPressApp(app) }
                                         )
@@ -330,34 +351,15 @@ fun HomeWorkspaceScreen(
                 } else {
                     // Extra Widget Page(s) — Dedicated compatibility layer for Android widgets
                     Column(modifier = Modifier.fillMaxSize()) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "PAGE ${page + 1} // WIDGETS",
-                                color = palette.accent,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = (12 * scale).sp
-                            )
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                KaruiSubtleButton("+ Widget", onAddWidget)
-                                if (settings.extraPagesCount > 0) {
-                                    KaruiSubtleButton("- Page", {
-                                        scope.launch { pagerState.animateScrollToPage(0) }
-                                        onRemovePage()
-                                    })
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-
                         val pageWidgets = if (page == 1) settings.widgetIds else emptyList()
                         if (pageWidgets.isEmpty()) {
                             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                KaruiSubtleButton("Tap to Add Widget", onAddWidget)
+                                Text(
+                                    text = "Long-press blank space for Widgets & Page options",
+                                    color = palette.gray,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = (12 * scale).sp
+                                )
                             }
                         } else {
                             LazyColumn(
@@ -371,8 +373,13 @@ fun HomeWorkspaceScreen(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .clip(karuiShape())
                                             .background(palette.surface)
-                                            .border(2.dp, palette.border, RectangleShape)
+                                            .border(2.dp, palette.border, karuiShape())
+                                            .combinedClickable(
+                                                onClick = {},
+                                                onLongClick = { widgetToRemove = widgetId }
+                                            )
                                             .padding(6.dp)
                                     ) {
                                         if (info != null) {
@@ -389,27 +396,11 @@ fun HomeWorkspaceScreen(
                                             )
                                         } else {
                                             Text(
-                                                text = "Widget unavailable (tap × to remove)",
+                                                text = "Widget unavailable (long-press to remove)",
                                                 color = palette.gray,
                                                 fontFamily = FontFamily.Monospace,
                                                 fontSize = 12.sp,
                                                 modifier = Modifier.padding(16.dp)
-                                            )
-                                        }
-                                        Box(
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .size(22.dp)
-                                                .background(palette.bg)
-                                                .border(1.dp, palette.border, RectangleShape)
-                                                .clickable { onRemoveWidget(widgetId) },
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                imageVector = Icons.Rounded.Close,
-                                                contentDescription = "Remove Widget",
-                                                tint = palette.accent,
-                                                modifier = Modifier.size(13.dp)
                                             )
                                         }
                                     }
@@ -417,6 +408,7 @@ fun HomeWorkspaceScreen(
                             }
                         }
                     }
+                }
                 }
             }
 
@@ -444,8 +436,9 @@ fun HomeWorkspaceScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(karuiShape())
                         .background(palette.surface)
-                        .border(2.dp, palette.border, RectangleShape)
+                        .border(2.dp, palette.border, karuiShape())
                         .clickable { onOpenDrawer(true) }
                         .padding(horizontal = 12.dp, vertical = 11.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -493,8 +486,9 @@ fun HomeWorkspaceScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(karuiShape())
                         .background(palette.surface)
-                        .border(2.dp, palette.border, RectangleShape)
+                        .border(2.dp, palette.border, karuiShape())
                         .padding(horizontal = 6.dp, vertical = 6.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
@@ -522,8 +516,9 @@ fun HomeWorkspaceScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(karuiShape())
                     .background(palette.surface)
-                    .border(2.dp, palette.border, RectangleShape)
+                    .border(2.dp, palette.border, karuiShape())
                     .padding(14.dp)
             ) {
                 Text(
@@ -542,12 +537,49 @@ fun HomeWorkspaceScreen(
                 KaruiSubtleButton("Add Widget", { showHomeMenu = false; onAddWidget() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("Add Home Page", { showHomeMenu = false; onAddPage() }, Modifier.fillMaxWidth())
+                if (pagerState.currentPage > 0 && settings.extraPagesCount > 0) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    KaruiSubtleButton("Delete This Page", {
+                        showHomeMenu = false
+                        scope.launch { pagerState.animateScrollToPage(0) }
+                        onRemovePage()
+                    }, Modifier.fillMaxWidth())
+                }
                 Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("Open App Drawer", { showHomeMenu = false; onOpenDrawer(false) }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("System Wallpaper", { showHomeMenu = false; onOpenWallpaper() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("Lock Screen", { showHomeMenu = false; onLockScreen() }, Modifier.fillMaxWidth())
+            }
+        }
+    }
+
+    widgetToRemove?.let { wId ->
+        Dialog(onDismissRequest = { widgetToRemove = null }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(karuiShape())
+                    .background(palette.surface)
+                    .border(2.dp, palette.border, karuiShape())
+                    .padding(14.dp)
+            ) {
+                Text(
+                    text = "WIDGET OPTIONS",
+                    color = palette.accent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (14 * scale).sp
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KaruiSubtleButton("Cancel", { widgetToRemove = null }, Modifier.weight(1f))
+                    KaruiButton("Remove Widget", {
+                        onRemoveWidget(wId)
+                        widgetToRemove = null
+                    }, Modifier.weight(1f))
+                }
             }
         }
     }

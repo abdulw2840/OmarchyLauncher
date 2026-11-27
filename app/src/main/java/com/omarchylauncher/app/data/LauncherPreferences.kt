@@ -31,6 +31,7 @@ enum class WebSearchProvider(val label: String) {
 data class LauncherSettings(
     val themeName: String = "tokyo-night",
     val uiScale: Float = 1.0f,
+    val cornerRadiusDp: Int = 0,
     val solidBackground: Boolean = true,
     val wallpaperDimAlpha: Float = 0.72f,
     val gridColumns: Int = 4,
@@ -48,6 +49,7 @@ data class LauncherSettings(
     val hapticFeedback: Boolean = true,
     val monochromeIcons: Boolean = false,
     val iconShape: IconShape = IconShape.SQUARE,
+    val iconSizeDp: Int = 44,
     val hiddenPin: String = "",
     val webSearchProvider: WebSearchProvider = WebSearchProvider.GOOGLE_APP,
     val weatherLocation: String = "",
@@ -69,6 +71,7 @@ class LauncherPreferences(private val context: Context) {
     private object Keys {
         val THEME_NAME = stringPreferencesKey("theme_name")
         val UI_SCALE = floatPreferencesKey("ui_scale")
+        val CORNER_RADIUS = intPreferencesKey("corner_radius_dp")
         val SOLID_BG = booleanPreferencesKey("solid_bg")
         val WALLPAPER_DIM = floatPreferencesKey("wallpaper_dim")
         val GRID_COLS = intPreferencesKey("grid_cols")
@@ -86,6 +89,7 @@ class LauncherPreferences(private val context: Context) {
         val HAPTIC = booleanPreferencesKey("haptic")
         val MONOCHROME_ICONS = booleanPreferencesKey("monochrome_icons")
         val ICON_SHAPE = stringPreferencesKey("icon_shape")
+        val ICON_SIZE_DP = intPreferencesKey("icon_size_dp")
         val HIDDEN_PIN = stringPreferencesKey("hidden_pin")
         val WEB_SEARCH_PROVIDER = stringPreferencesKey("web_search_provider")
         val WEATHER_LOCATION = stringPreferencesKey("weather_location")
@@ -114,6 +118,7 @@ class LauncherPreferences(private val context: Context) {
         LauncherSettings(
             themeName = p[Keys.THEME_NAME] ?: "tokyo-night",
             uiScale = (p[Keys.UI_SCALE] ?: 1.0f).coerceIn(0.85f, 1.3f),
+            cornerRadiusDp = (p[Keys.CORNER_RADIUS] ?: 0).coerceIn(0, 24),
             solidBackground = p[Keys.SOLID_BG] ?: true,
             wallpaperDimAlpha = (p[Keys.WALLPAPER_DIM] ?: 0.72f).coerceIn(0.2f, 0.95f),
             gridColumns = (p[Keys.GRID_COLS] ?: 4).coerceIn(3, 6),
@@ -131,6 +136,7 @@ class LauncherPreferences(private val context: Context) {
             hapticFeedback = p[Keys.HAPTIC] ?: true,
             monochromeIcons = p[Keys.MONOCHROME_ICONS] ?: false,
             iconShape = shape,
+            iconSizeDp = (p[Keys.ICON_SIZE_DP] ?: 44).coerceIn(32, 68),
             hiddenPin = p[Keys.HIDDEN_PIN] ?: "",
             webSearchProvider = searchProv,
             weatherLocation = p[Keys.WEATHER_LOCATION] ?: "",
@@ -156,6 +162,8 @@ class LauncherPreferences(private val context: Context) {
 
     suspend fun setThemeName(value: String) = context.dataStore.edit { it[Keys.THEME_NAME] = value }
     suspend fun setUiScale(value: Float) = context.dataStore.edit { it[Keys.UI_SCALE] = value.coerceIn(0.85f, 1.3f) }
+    suspend fun setCornerRadiusDp(value: Int) = context.dataStore.edit { it[Keys.CORNER_RADIUS] = value.coerceIn(0, 24) }
+    suspend fun setIconSizeDp(value: Int) = context.dataStore.edit { it[Keys.ICON_SIZE_DP] = value.coerceIn(32, 68) }
     suspend fun setSolidBackground(value: Boolean) = context.dataStore.edit { it[Keys.SOLID_BG] = value }
     suspend fun setWallpaperDimAlpha(value: Float) = context.dataStore.edit { it[Keys.WALLPAPER_DIM] = value.coerceIn(0.2f, 0.95f) }
     suspend fun setGridColumns(value: Int) = context.dataStore.edit { it[Keys.GRID_COLS] = value.coerceIn(3, 6) }
@@ -194,6 +202,21 @@ class LauncherPreferences(private val context: Context) {
             val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
             if (list.contains(pkg)) list.remove(pkg) else list.add(pkg)
             p[Keys.PINNED_HOME] = list.joinToString(",")
+        }
+    }
+
+    suspend fun movePinnedHome(pkg: String, delta: Int) {
+        context.dataStore.edit { p ->
+            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
+            val idx = list.indexOf(pkg)
+            if (idx >= 0) {
+                val target = (idx + delta).coerceIn(0, list.lastIndex)
+                if (target != idx) {
+                    val item = list.removeAt(idx)
+                    list.add(target, item)
+                    p[Keys.PINNED_HOME] = list.joinToString(",")
+                }
+            }
         }
     }
 
