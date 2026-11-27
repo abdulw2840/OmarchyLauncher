@@ -372,7 +372,7 @@ class MainActivity : ComponentActivity() {
                                     draggingDrawerPos = latestRootPointer.get()
                                 },
                                 onDragToHomeMove = {
-                                    draggingDrawerPos = latestRootPointer
+                                    draggingDrawerPos = latestRootPointer.get()
                                 },
                                 onDragToHomeEnd = { commit ->
                                     val dropped = draggingDrawerApp
