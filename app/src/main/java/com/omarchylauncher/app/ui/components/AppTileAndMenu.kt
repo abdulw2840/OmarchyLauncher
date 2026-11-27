@@ -53,6 +53,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.CancellationException
 import androidx.compose.ui.zIndex
 import com.omarchylauncher.app.data.AppEntry
 import com.omarchylauncher.app.data.IconShape
@@ -195,7 +196,15 @@ fun Modifier.karuiAppHoldOrDrag(
                     onDrag()
                 }
             }
-        } catch (_: Throwable) {
+        } catch (cancelled: CancellationException) {
+            if (gestureState == IconGestureState.DRAGGING) {
+                onDragCancel()
+            }
+            gestureState = IconGestureState.IDLE
+            onInteractionActiveChange(false)
+            throw cancelled
+        } catch (failure: Exception) {
+            // Recover from gesture/input failures without swallowing fatal JVM errors.
             if (gestureState == IconGestureState.DRAGGING) {
                 onDragCancel()
             }

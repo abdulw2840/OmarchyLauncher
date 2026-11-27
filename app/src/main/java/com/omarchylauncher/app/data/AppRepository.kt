@@ -20,6 +20,8 @@ import androidx.core.graphics.drawable.toBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -52,12 +54,21 @@ data class IconPackInfo(
     val label: String
 )
 
+private data class CachedLauncherIcons(
+    val icon: ImageBitmap?,
+    val monochromeIcon: ImageBitmap?
+)
+
 class AppRepository(private val context: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Collapse bursts of package broadcasts/manual refresh requests into one scan.
+    private val refreshRequests = Channel<Unit>(Channel.CONFLATED)
     private val launcherApps = context.getSystemService(LauncherApps::class.java)
     private val iconCache = android.util.LruCache<String, ImageBitmap>(256)
     private val iconMonoCache = android.util.LruCache<String, Boolean>(256)
+    // Reuse decoded launcher icons across refreshes; the key changes when an app is updated.
+    private val launcherIconCache = android.util.LruCache<String, CachedLauncherIcons>(128)
 
     private val _apps = MutableStateFlow<List<AppEntry>>(emptyList())
     val apps: StateFlow<List<AppEntry>> = _apps.asStateFlow()
@@ -69,26 +80,62 @@ class AppRepository(private val context: Context) {
     val newlyInstalledPackages: SharedFlow<String> = _newlyInstalledPackages.asSharedFlow()
 
     private val callback = object : LauncherApps.Callback() {
-        override fun onPackageRemoved(packageName: String?, user: UserHandle?) = refresh()
+        override fun onPackageRemoved(packageName: String?, user: UserHandle?) {
+            invalidateLauncherIconCache(packageName)
+            refresh()
+        }
         override fun onPackageAdded(packageName: String?, user: UserHandle?) {
+            invalidateLauncherIconCache(packageName)
             if (!packageName.isNullOrBlank() && packageName != context.packageName) {
                 _newlyInstalledPackages.tryEmit(packageName)
             }
             refresh()
         }
-        override fun onPackageChanged(packageName: String?, user: UserHandle?) = refresh()
-        override fun onPackagesAvailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) = refresh()
-        override fun onPackagesUnavailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) = refresh()
+        override fun onPackageChanged(packageName: String?, user: UserHandle?) {
+            invalidateLauncherIconCache(packageName)
+            refresh()
+        }
+        override fun onPackagesAvailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) {
+            packageNames?.forEach { packageName -> invalidateLauncherIconCache(packageName) }
+            refresh()
+        }
+        override fun onPackagesUnavailable(packageNames: Array<out String>?, user: UserHandle?, replacing: Boolean) {
+            packageNames?.forEach { packageName -> invalidateLauncherIconCache(packageName) }
+            refresh()
+        }
+    }
+
+    private fun invalidateLauncherIconCache(packageName: String?) {
+        if (packageName.isNullOrBlank()) return
+        val marker = "|$packageName|"
+        launcherIconCache.snapshot().keys
+            .filter { it.contains(marker) }
+            .forEach { key -> launcherIconCache.remove(key) }
     }
 
     init {
+        scope.launch {
+            for (ignored in refreshRequests) {
+                try {
+                    performRefresh()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    android.util.Log.e("AppRepository", "App refresh failed", failure)
+                }
+            }
+        }
         runCatching { launcherApps.registerCallback(callback) }
         refresh()
     }
 
     fun refresh() {
-        scope.launch {
-            _isLoading.value = true
+        refreshRequests.trySend(Unit)
+    }
+
+    private suspend fun performRefresh() {
+        _isLoading.value = true
+        try {
             val myPkg = context.packageName
             val activities = runCatching {
                 launcherApps.getActivityList(null, Process.myUserHandle())
@@ -99,26 +146,30 @@ class AppRepository(private val context: Context) {
             val entries = activities
                 .filter { it.applicationInfo.packageName != myPkg }
                 .map { info ->
+                    val packageName = info.applicationInfo.packageName
                     val isSystem = (info.applicationInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                    val rawDrawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
-                    val icon = runCatching {
-                        rawDrawable?.toBitmap(96, 96)?.asImageBitmap()
-                    }.getOrNull()
-                    var monoIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        runCatching {
-                            val adaptive = rawDrawable as? AdaptiveIconDrawable
-                            adaptive?.monochrome?.toBitmap(96, 96)?.asImageBitmap()
-                        }.getOrNull()
-                    } else null
+                    val cacheKey = "${info.user.hashCode()}|$packageName|${info.componentName.className}"
+                    val cachedIcons = launcherIconCache.get(cacheKey) ?: run {
+                        val rawDrawable = runCatching { info.getBadgedIcon(0) }.getOrNull()
+                        val icon = runCatching { rawDrawable?.toBitmap(96, 96)?.asImageBitmap() }.getOrNull()
+                        val monochromeIcon = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            runCatching {
+                                val adaptive = rawDrawable as? AdaptiveIconDrawable
+                                adaptive?.monochrome?.toBitmap(96, 96)?.asImageBitmap()
+                            }.getOrNull()
+                        } else null
+                        CachedLauncherIcons(icon, monochromeIcon).also {
+                            launcherIconCache.put(cacheKey, it)
+                        }
+                    }
+                    val icon = cachedIcons.icon
+                    var monoIcon = cachedIcons.monochromeIcon
                     if (monoIcon == null && themedPackMap.isNotEmpty()) {
-                        val pkgName = info.applicationInfo.packageName
-                        val compKey = "$pkgName/${info.componentName.className}"
-                        val spec = themedPackMap[compKey] ?: themedPackMap[pkgName]
+                        val compKey = packageName + "/" + info.componentName.className
+                        val spec = themedPackMap[compKey] ?: themedPackMap[packageName]
                         if (spec != null) {
                             val loaded = loadIconFromSpecWithMono(spec)
-                            if (loaded != null && loaded.second) {
-                                monoIcon = loaded.first
-                            }
+                            if (loaded != null && loaded.second) monoIcon = loaded.first
                         }
                     }
                     AppEntry(
@@ -131,10 +182,11 @@ class AppRepository(private val context: Context) {
                         monochromeIcon = monoIcon
                     )
                 }
-                .distinctBy { "${it.packageName}/${it.activityName}" }
+                .distinctBy { it.packageName + "/" + it.activityName }
                 .sortedBy { it.label.lowercase() }
 
             _apps.value = entries
+        } finally {
             _isLoading.value = false
         }
     }

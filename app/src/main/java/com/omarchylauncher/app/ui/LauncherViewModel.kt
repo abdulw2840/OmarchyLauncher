@@ -51,6 +51,8 @@ data class ClockState(
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
 
     private val app = application as OmarchyLauncherApp
+    private var stepSensorManager: SensorManager? = null
+    private var stepSensorListener: SensorEventListener? = null
 
     val settings: StateFlow<LauncherSettings> = app.preferences.settingsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LauncherSettings())
@@ -140,9 +142,9 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     private fun registerStepSensor() {
         runCatching {
-            val sm = app.getSystemService(SensorManager::class.java)
-            val sensor = sm?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
-            sm.registerListener(object : SensorEventListener {
+            val manager = app.getSystemService(SensorManager::class.java) ?: return
+            val sensor = manager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
+            val listener = object : SensorEventListener {
                 override fun onSensorChanged(event: SensorEvent?) {
                     val total = event?.values?.firstOrNull()?.toInt() ?: return
                     val today = Calendar.getInstance().let { "${it.get(Calendar.YEAR)}-${it.get(Calendar.DAY_OF_YEAR)}" }
@@ -155,8 +157,21 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                     latestSensorSteps = (total - baseline).coerceAtLeast(0)
                 }
                 override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
-            }, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+            if (manager.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_NORMAL)) {
+                stepSensorManager = manager
+                stepSensorListener = listener
+            }
         }
+    }
+
+    override fun onCleared() {
+        stepSensorListener?.let { listener ->
+            stepSensorManager?.unregisterListener(listener)
+        }
+        stepSensorListener = null
+        stepSensorManager = null
+        super.onCleared()
     }
 
     private fun readTodayScreenTime(): String {

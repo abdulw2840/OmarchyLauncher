@@ -7,7 +7,7 @@ import android.appwidget.AppWidgetProviderInfo
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -56,11 +56,14 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -171,12 +174,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        runCatching {
-            val mode = display?.supportedModes?.maxByOrNull { it.refreshRate }
-            if (mode != null) {
-                window.attributes = window.attributes.apply { preferredDisplayModeId = mode.modeId }
-            }
-        }
+        // Let Android's display policy select the refresh rate. Forcing the highest
+        // supported mode can cause mode-switch churn and hurt power/perceived smoothness
+        // on devices with adaptive refresh-rate displays.
 
         appWidgetManager = AppWidgetManager.getInstance(this)
         // [EXP-WIDGET-LONGPRESS] Use OmarchyAppWidgetHost so holding anywhere on a widget opens customization
@@ -195,6 +195,9 @@ class MainActivity : ComponentActivity() {
             // [EXP-DRAWER-SWIPE] Continuous 0f..1f progress for gradual finger-driven drawer & home transition
             val drawerProgress = remember { Animatable(0f) }
             val drawerScope = rememberCoroutineScope()
+            var drawerDragProgress by remember { mutableFloatStateOf(-1f) }
+            var drawerVisible by remember { mutableStateOf(false) }
+            var drawerAnimationJob by remember { mutableStateOf<Job?>(null) }
             var focusDrawerSearch by remember { mutableStateOf(false) }
             var contextApp by remember { mutableStateOf<AppEntry?>(null) }
             var editingApp by remember { mutableStateOf<AppEntry?>(null) }
@@ -203,17 +206,24 @@ class MainActivity : ComponentActivity() {
             var showWidgetPicker by remember { mutableStateOf(false) }
             var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
             var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
-            var latestRootPointer by remember { mutableStateOf(Offset.Zero) }
+            val latestRootPointer = remember { java.util.concurrent.atomic.AtomicReference(Offset.Zero) }
             var dockTopY by remember { mutableStateOf(Float.MAX_VALUE) }
             var homeDropSlotResolver by remember { mutableStateOf<(Offset) -> Int?>({ null }) }
 
             fun setDrawerOpenAnimated(open: Boolean, focusSearch: Boolean = false) {
                 focusDrawerSearch = if (open) focusSearch else false
-                drawerScope.launch {
+                drawerVisible = true
+                drawerAnimationJob?.cancel()
+                drawerAnimationJob = drawerScope.launch {
+                    // Transfer the exact finger position into the animator once on release.
+                    val start = if (drawerDragProgress >= 0f) drawerDragProgress else drawerProgress.value
+                    drawerProgress.snapTo(start.coerceIn(0f, 1f))
+                    drawerDragProgress = -1f
                     drawerProgress.animateTo(
                         targetValue = if (open) 1f else 0f,
-                        animationSpec = spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessMediumLow)
+                        animationSpec = spring(dampingRatio = 0.78f, stiffness = Spring.StiffnessMediumLow)
                     )
+                    if (!open) drawerVisible = false
                 }
             }
 
@@ -221,8 +231,30 @@ class MainActivity : ComponentActivity() {
                 if (homeResetSignal > 0) setDrawerOpenAnimated(false)
             }
 
-            BackHandler(enabled = drawerProgress.value > 0.05f) {
-                setDrawerOpenAnimated(false)
+            // Only consume Back while the drawer is open. When it is closed, leave
+            // Back-to-home / cross-task navigation entirely to Android's system.
+            PredictiveBackHandler(enabled = drawerVisible && drawerProgress.value > 0.05f) { backEvents ->
+                val startProgress = drawerProgress.value
+                try {
+                    backEvents.collect { event ->
+                        drawerProgress.snapTo(
+                            (startProgress * (1f - event.progress)).coerceIn(0f, 1f)
+                        )
+                    }
+                    focusDrawerSearch = false
+                    drawerDragProgress = -1f
+                    drawerProgress.snapTo(0f)
+                    drawerVisible = false
+                } catch (cancelled: CancellationException) {
+                    drawerProgress.animateTo(
+                        targetValue = startProgress,
+                        animationSpec = spring(
+                            dampingRatio = 0.88f,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                    throw cancelled
+                }
             }
 
             OmarchyTheme(
@@ -248,11 +280,11 @@ class MainActivity : ComponentActivity() {
                         .pointerInput(Unit) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-                                latestRootPointer = down.position
+                                latestRootPointer.set(down.position)
                                 while (true) {
                                     val event = awaitPointerEvent(PointerEventPass.Initial)
                                     val ch = event.changes.firstOrNull { it.id == down.id } ?: break
-                                    latestRootPointer = ch.position
+                                    latestRootPointer.set(ch.position)
                                     if (!ch.pressed) break
                                 }
                             }
@@ -268,7 +300,7 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier
                             .fillMaxSize()
                             .graphicsLayer {
-                                val p = if (draggingDrawerApp != null) 0f else drawerProgress.value
+                                val p = if (draggingDrawerApp != null) 0f else if (drawerDragProgress >= 0f) drawerDragProgress else drawerProgress.value
                                 val s = 1f - 0.08f * p
                                 scaleX = s
                                 scaleY = s
@@ -292,7 +324,8 @@ class MainActivity : ComponentActivity() {
                             onDockTopReported = { dockTopY = it },
                             onRegisterDropSlotResolver = { homeDropSlotResolver = it },
                             onDrawerDragFraction = { frac ->
-                                drawerScope.launch { drawerProgress.snapTo(frac) }
+                                drawerVisible = true
+                                drawerDragProgress = frac.coerceIn(0f, 1f)
                             },
                             onDrawerDragSettle = { open, focusSearch ->
                                 setDrawerOpenAnimated(open, focusSearch)
@@ -329,14 +362,19 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
-                    if (drawerProgress.value > 0.005f || draggingDrawerApp != null) {
+                    if (drawerVisible || draggingDrawerApp != null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
-                                    val p = drawerProgress.value.coerceIn(0f, 1f)
-                                    translationY = (1f - p) * screenHeightPx * 0.42f
-                                    alpha = if (draggingDrawerApp != null) 0f else (p * 1.15f).coerceIn(0f, 1f)
+                                    val p = (if (drawerDragProgress >= 0f) drawerDragProgress else drawerProgress.value).coerceIn(0f, 1f)
+                                    // The drawer grows into place with a restrained spring,
+                                    // rather than appearing as a rigid translated sheet.
+                                    val easedProgress = p.coerceIn(0f, 1f)
+                                    scaleX = 0.975f + 0.025f * easedProgress
+                                    scaleY = 0.985f + 0.015f * easedProgress
+                                    translationY = (1f - easedProgress) * screenHeightPx * 0.42f
+                                    alpha = if (draggingDrawerApp != null) 0f else (easedProgress * 1.15f).coerceIn(0f, 1f)
                                 }
                         ) {
                             AppDrawerScreen(
@@ -347,7 +385,8 @@ class MainActivity : ComponentActivity() {
                                 contentPadding = insets,
                                 onClose = { setDrawerOpenAnimated(false) },
                                 onCloseDragFraction = { frac ->
-                                    drawerScope.launch { drawerProgress.snapTo(frac) }
+                                    drawerVisible = true
+                                    drawerDragProgress = frac.coerceIn(0f, 1f)
                                 },
                                 onCloseDragSettle = { open ->
                                     setDrawerOpenAnimated(open)
@@ -372,10 +411,10 @@ class MainActivity : ComponentActivity() {
                                 onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) },
                                 onDragToHomeStart = { app ->
                                     draggingDrawerApp = app
-                                    draggingDrawerPos = latestRootPointer
+                                    draggingDrawerPos = latestRootPointer.get()
                                 },
                                 onDragToHomeMove = {
-                                    draggingDrawerPos = latestRootPointer
+                                    draggingDrawerPos = latestRootPointer.get()
                                 },
                                 onDragToHomeEnd = { commit ->
                                     val dropped = draggingDrawerApp
@@ -386,6 +425,9 @@ class MainActivity : ComponentActivity() {
                                     if (commit && dropped != null) {
                                         // [EXP-DRAWER-DROP-SLOT] Drop into exact empty Home grid slot near finger
                                         val slotIndex = homeDropSlotResolver(dropPos)
+                                        drawerAnimationJob?.cancel()
+                                        drawerDragProgress = -1f
+                                        drawerVisible = false
                                         drawerScope.launch { drawerProgress.snapTo(0f) }
                                         when {
                                             dropY < topDropLimitPx -> {

@@ -60,6 +60,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
@@ -132,6 +133,7 @@ fun AppDrawerScreen(
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
+    var drawerGestureCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
 
     var query by remember { mutableStateOf("") }
     val tabs = if (settings.showDrawerTabs) listOf("all", "user", "system") else emptyList()
@@ -146,8 +148,10 @@ fun AppDrawerScreen(
     var resolvedHiddenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
     var resolvedFrozenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
 
-    val listState = rememberLazyListState()
-    val gridState = rememberLazyGridState()
+    // Give each pager tab its own lazy state; never attach one LazyListState/GridState
+    // to multiple pager pages at the same time.
+    val listStates = listOf(rememberLazyListState(), rememberLazyListState(), rememberLazyListState())
+    val gridStates = listOf(rememberLazyGridState(), rememberLazyGridState(), rememberLazyGridState())
 
     LaunchedEffect(showHiddenVault, settings.hiddenPackages) {
         if (showHiddenVault) {
@@ -180,6 +184,10 @@ fun AppDrawerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.bg.copy(alpha = settings.drawerBgAlpha))
+            // Convert pointer samples back to root coordinates. This layer is translated
+            // during the drag; local coordinates otherwise feed that translation back
+            // into the next delta and make slow swipes oscillate.
+            .onGloballyPositioned { drawerGestureCoordinates = it }
             .pointerInput(settings.drawerListMode) {
                 val touchSlop = viewConfiguration.touchSlop
                 awaitEachGesture {
@@ -187,7 +195,7 @@ fun AppDrawerScreen(
                     var totalDx = 0f
                     var totalDy = 0f
                     var lastDy = 0f
-                    var lastPos = down.position
+                    var lastPos = drawerGestureCoordinates?.localToRoot(down.position) ?: down.position
                     var pullingToClose = false
                     var lastFrac = 1f
 
@@ -197,19 +205,21 @@ fun AppDrawerScreen(
                             val change = event.changes.firstOrNull { it.id == down.id } ?: break
                             if (!change.pressed) {
                                 if (pullingToClose) {
-                                    val keepOpen = lastDy <= 4f && lastFrac > 0.72f
+                                    val keepOpen = lastFrac > 0.85f
                                     onCloseDragSettle(keepOpen)
                                 }
                                 break
                             }
 
-                            val delta = change.position - lastPos
-                            lastPos = change.position
+                            val rootPosition = drawerGestureCoordinates?.localToRoot(change.position) ?: change.position
+                            val delta = rootPosition - lastPos
+                            lastPos = rootPosition
                             lastDy = delta.y
                             totalDx += delta.x
                             totalDy += delta.y
 
-                            val atTop = if (settings.drawerListMode) !listState.canScrollBackward else !gridState.canScrollBackward
+                            val activePage = pagerState.currentPage.coerceIn(0, 2)
+                            val atTop = if (settings.drawerListMode) !listStates[activePage].canScrollBackward else !gridStates[activePage].canScrollBackward
                             if (!isDraggingOut && !pullingToClose && atTop && totalDy > touchSlop * 2f && abs(totalDy) > abs(totalDx) * 1.4f) {
                                 pullingToClose = true
                             }
@@ -448,6 +458,13 @@ fun AppDrawerScreen(
                 modifier = Modifier.weight(1f)
             ) { page ->
                 val cleanQuery = if (query.startsWith(":")) "" else query.trim()
+                val pageMotion = Modifier.graphicsLayer {
+                    val pageOffset = (pagerState.currentPage - page + pagerState.currentPageOffsetFraction)
+                    val distance = kotlin.math.abs(pageOffset).coerceIn(0f, 1f)
+                    scaleX = 1f - 0.025f * distance
+                    scaleY = 1f - 0.035f * distance
+                    alpha = 1f - 0.10f * distance
+                }
                 val pageApps = remember(apps, settings.hiddenPackages, cleanQuery, page) {
                     apps.filter { app ->
                         val isHidden = settings.hiddenPackages.contains(app.packageName)
@@ -465,7 +482,7 @@ fun AppDrawerScreen(
                 }
 
                 if (pageApps.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(modifier = Modifier.fillMaxSize().then(pageMotion), contentAlignment = Alignment.Center) {
                         Text(
                             text = "NO APPS",
                             color = palette.gray,
@@ -481,8 +498,8 @@ fun AppDrawerScreen(
                     } else null
 
                     LazyColumn(
-                        state = listState,
-                        modifier = Modifier.fillMaxSize(),
+                        state = listStates[page],
+                        modifier = Modifier.fillMaxSize().then(pageMotion),
                         contentPadding = PaddingValues(
                             start = 16.dp,
                             end = 16.dp,
@@ -557,9 +574,9 @@ fun AppDrawerScreen(
                     }
                 } else {
                     LazyVerticalGrid(
-                        state = gridState,
+                        state = gridStates[page],
                         columns = GridCells.Fixed(settings.drawerColumns),
-                        modifier = Modifier.fillMaxSize(),
+                        modifier = Modifier.fillMaxSize().then(pageMotion),
                         contentPadding = PaddingValues(
                             start = 12.dp,
                             end = 12.dp,
