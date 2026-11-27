@@ -46,6 +46,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -106,7 +108,7 @@ fun HomeWorkspaceScreen(
     onResizeWidget: (Int, Int) -> Unit,
     onAddPage: () -> Unit,
     onRemovePage: () -> Unit,
-    onReorderPinnedHome: (Int, Int) -> Unit,
+    onSavePinnedOrder: (List<String>) -> Unit,
     onLockScreen: () -> Unit,
     onExpandNotifications: () -> Unit,
     onRefreshWeather: () -> Unit,
@@ -124,9 +126,19 @@ fun HomeWorkspaceScreen(
     var widgetToManage by remember { mutableStateOf<Int?>(null) }
     val gridState = rememberLazyGridState()
 
-    var draggingIndex by remember { mutableIntStateOf(-1) }
+    var draggingPkg by remember { mutableStateOf<String?>(null) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
     var totalDragDist by remember { mutableFloatStateOf(0f) }
+    var swapCount by remember { mutableIntStateOf(0) }
+    var lastSwapTime by remember { mutableLongStateOf(0L) }
+
+    val localPinned = remember { mutableStateListOf<AppEntry>() }
+    LaunchedEffect(pinnedApps, draggingPkg) {
+        if (draggingPkg == null) {
+            localPinned.clear()
+            localPinned.addAll(pinnedApps)
+        }
+    }
 
     val hasWidgetsPage = settings.widgetIds.isNotEmpty() || settings.extraPagesCount > 0
     val totalPages = 1 + maxOf(settings.extraPagesCount, if (settings.widgetIds.isNotEmpty()) 1 else 0)
@@ -175,7 +187,7 @@ fun HomeWorkspaceScreen(
                         totalDx += delta.x
                         totalDy += delta.y
 
-                        if (draggingIndex < 0 && !triggered && abs(totalDy) > 125f && abs(totalDy) > abs(totalDx) * 2.2f) {
+                        if (draggingPkg == null && !triggered && abs(totalDy) > 125f && abs(totalDy) > abs(totalDx) * 2.2f) {
                             if (totalDy < 0f && !gridState.canScrollForward) {
                                 triggered = true
                                 onOpenDrawer(settings.autoFocusDrawerSearch)
@@ -305,7 +317,7 @@ fun HomeWorkspaceScreen(
                         }
 
                         Box(modifier = Modifier.weight(1f)) {
-                            if (pinnedApps.isNotEmpty()) {
+                            if (localPinned.isNotEmpty()) {
                                 LazyVerticalGrid(
                                     state = gridState,
                                     columns = GridCells.Fixed(settings.gridColumns),
@@ -313,10 +325,11 @@ fun HomeWorkspaceScreen(
                                     verticalArrangement = Arrangement.spacedBy(8.dp),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    itemsIndexed(pinnedApps, key = { _, app -> "${app.packageName}/${app.activityName}" }) { index, app ->
-                                        val isDragging = draggingIndex == index
+                                    itemsIndexed(localPinned, key = { _, app -> "${app.packageName}/${app.activityName}" }) { index, app ->
+                                        val isDragging = draggingPkg == app.packageName
                                         Box(
                                             modifier = Modifier
+                                                .then(if (!isDragging) Modifier.animateItem() else Modifier)
                                                 .zIndex(if (isDragging) 10f else 0f)
                                                 .graphicsLayer {
                                                     if (isDragging) {
@@ -326,51 +339,66 @@ fun HomeWorkspaceScreen(
                                                         scaleY = 1.08f
                                                     }
                                                 }
-                                                .pointerInput(index, pinnedApps.size) {
+                                                .pointerInput(app.packageName) {
                                                     detectDragGesturesAfterLongPress(
                                                         onDragStart = {
-                                                            draggingIndex = index
+                                                            draggingPkg = app.packageName
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
+                                                            swapCount = 0
+                                                            lastSwapTime = 0L
                                                         },
                                                         onDrag = { change, dragAmount ->
                                                             change.consume()
                                                             dragOffset += dragAmount
                                                             totalDragDist += dragAmount.getDistance()
 
+                                                            val currentIdx = localPinned.indexOfFirst { it.packageName == draggingPkg }
+                                                            if (currentIdx < 0) return@detectDragGesturesAfterLongPress
                                                             val currentItem = gridState.layoutInfo.visibleItemsInfo
-                                                                .firstOrNull { it.index == draggingIndex }
-                                                            if (currentItem != null) {
-                                                                val centerX = currentItem.offset.x + currentItem.size.width / 2f + dragOffset.x
-                                                                val centerY = currentItem.offset.y + currentItem.size.height / 2f + dragOffset.y
-                                                                val target = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
-                                                                    item.index != draggingIndex &&
-                                                                        centerX >= item.offset.x &&
-                                                                        centerX <= item.offset.x + item.size.width &&
-                                                                        centerY >= item.offset.y &&
-                                                                        centerY <= item.offset.y + item.size.height
-                                                                }
-                                                                if (target != null) {
-                                                                    val deltaX = (currentItem.offset.x - target.offset.x).toFloat()
-                                                                    val deltaY = (currentItem.offset.y - target.offset.y).toFloat()
-                                                                    onReorderPinnedHome(draggingIndex, target.index)
-                                                                    draggingIndex = target.index
-                                                                    dragOffset = Offset(dragOffset.x + deltaX, dragOffset.y + deltaY)
-                                                                }
+                                                                .firstOrNull { it.index == currentIdx } ?: return@detectDragGesturesAfterLongPress
+
+                                                            val now = System.currentTimeMillis()
+                                                            if (now - lastSwapTime < 120L) return@detectDragGesturesAfterLongPress
+
+                                                            val centerX = currentItem.offset.x + currentItem.size.width / 2f + dragOffset.x
+                                                            val centerY = currentItem.offset.y + currentItem.size.height / 2f + dragOffset.y
+
+                                                            val target = gridState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                                                if (item.index == currentIdx || item.index !in localPinned.indices) return@firstOrNull false
+                                                                val mx = item.size.width * 0.20f
+                                                                val my = item.size.height * 0.20f
+                                                                centerX >= item.offset.x + mx &&
+                                                                    centerX <= item.offset.x + item.size.width - mx &&
+                                                                    centerY >= item.offset.y + my &&
+                                                                    centerY <= item.offset.y + item.size.height - my
+                                                            }
+                                                            if (target != null) {
+                                                                val deltaX = (currentItem.offset.x - target.offset.x).toFloat()
+                                                                val deltaY = (currentItem.offset.y - target.offset.y).toFloat()
+                                                                val moved = localPinned.removeAt(currentIdx)
+                                                                localPinned.add(target.index, moved)
+                                                                dragOffset = Offset(dragOffset.x + deltaX, dragOffset.y + deltaY)
+                                                                swapCount++
+                                                                lastSwapTime = now
                                                             }
                                                         },
                                                         onDragEnd = {
-                                                            if (totalDragDist < 20f) {
+                                                            if (swapCount == 0 && totalDragDist < 14f) {
                                                                 onLongPressApp(app)
+                                                            } else if (swapCount > 0) {
+                                                                onSavePinnedOrder(localPinned.map { it.packageName })
                                                             }
-                                                            draggingIndex = -1
+                                                            draggingPkg = null
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
+                                                            swapCount = 0
                                                         },
                                                         onDragCancel = {
-                                                            draggingIndex = -1
+                                                            draggingPkg = null
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
+                                                            swapCount = 0
                                                         }
                                                     )
                                                 }
@@ -574,10 +602,13 @@ fun HomeWorkspaceScreen(
                 KaruiSubtleButton("Add Widget", { showHomeMenu = false; onAddWidget() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("Add Home Page", { showHomeMenu = false; onAddPage() }, Modifier.fillMaxWidth())
-                if (pagerState.currentPage > 0 && settings.extraPagesCount > 0) {
+                if (pagerState.currentPage > 0) {
                     Spacer(modifier = Modifier.height(8.dp))
                     KaruiSubtleButton("Delete This Page", {
                         showHomeMenu = false
+                        if (pagerState.currentPage == 1) {
+                            settings.widgetIds.forEach { onRemoveWidget(it) }
+                        }
                         scope.launch { pagerState.animateScrollToPage(0) }
                         onRemovePage()
                     }, Modifier.fillMaxWidth())

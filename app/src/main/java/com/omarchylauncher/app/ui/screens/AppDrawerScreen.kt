@@ -37,6 +37,7 @@ import androidx.compose.material.icons.rounded.Clear
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.GridView
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.ViewList
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -109,7 +110,8 @@ fun AppDrawerScreen(
     onSearchWeb: (String, WebSearchProvider) -> Unit,
     onResolveHiddenApps: suspend (Set<String>) -> List<HiddenAppInfo>,
     onLaunchHiddenApp: (String) -> Unit,
-    onUnhideApp: (String) -> Unit
+    onUnhideApp: (String) -> Unit,
+    onUnfreezeApp: (String) -> Unit
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
@@ -123,7 +125,10 @@ fun AppDrawerScreen(
 
     var showPinDialog by remember { mutableStateOf(false) }
     var showHiddenVault by remember { mutableStateOf(false) }
+    var showDrawerMenu by remember { mutableStateOf(false) }
+    var showFrozenDialog by remember { mutableStateOf(false) }
     var resolvedHiddenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
+    var resolvedFrozenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
 
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
@@ -131,6 +136,12 @@ fun AppDrawerScreen(
     LaunchedEffect(showHiddenVault, settings.hiddenPackages) {
         if (showHiddenVault) {
             resolvedHiddenApps = onResolveHiddenApps(settings.hiddenPackages)
+        }
+    }
+
+    LaunchedEffect(showFrozenDialog, settings.frozenPackages) {
+        if (showFrozenDialog) {
+            resolvedFrozenApps = onResolveHiddenApps(settings.frozenPackages)
         }
     }
 
@@ -312,6 +323,18 @@ fun AppDrawerScreen(
                         modifier = Modifier.size(16.dp)
                     )
                 }
+                Spacer(modifier = Modifier.width(6.dp))
+            }
+            IconButton(
+                onClick = { showDrawerMenu = true },
+                modifier = Modifier.size(22.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.MoreVert,
+                    contentDescription = "Drawer Menu",
+                    tint = palette.accent,
+                    modifier = Modifier.size(18.dp)
+                )
             }
         }
 
@@ -684,6 +707,133 @@ fun AppDrawerScreen(
                                     )
                                 }
                                 KaruiSubtleButton("Unhide", { onUnhideApp(item.packageName) })
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Drawer Search Bar Quick Menu (Frozen Apps, Settings, Refresh, Layout — NO Hidden Apps)
+    if (showDrawerMenu) {
+        Dialog(onDismissRequest = { showDrawerMenu = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(karuiShape())
+                    .background(palette.surface)
+                    .border(2.dp, palette.border, karuiShape())
+                    .padding(14.dp)
+            ) {
+                Text(
+                    text = "DRAWER MENU",
+                    color = palette.accent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = (14 * scale).sp
+                )
+                Spacer(Modifier.height(10.dp))
+                KaruiDashedDivider()
+                Spacer(Modifier.height(10.dp))
+
+                KaruiSubtleButton(
+                    text = "Frozen Apps (${settings.frozenPackages.size})",
+                    onClick = { showDrawerMenu = false; showFrozenDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                KaruiSubtleButton(
+                    text = if (settings.drawerListMode) "Switch to Grid View" else "Switch to List View",
+                    onClick = { showDrawerMenu = false; onToggleListMode(!settings.drawerListMode) },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                KaruiSubtleButton(
+                    text = "Refresh Apps",
+                    onClick = { showDrawerMenu = false; onRefreshApps() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                KaruiSubtleButton(
+                    text = "Omarchy Settings",
+                    onClick = { showDrawerMenu = false; onClose(); onOpenSettings() },
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+
+    // Frozen Apps Dialog
+    if (showFrozenDialog) {
+        val frameShape = iconShapeToComposeShape(settings.iconShape)
+        Dialog(onDismissRequest = { showFrozenDialog = false }) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(karuiShape())
+                    .background(palette.surface)
+                    .border(2.dp, palette.border, karuiShape())
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "FROZEN APPS (${resolvedFrozenApps.size})",
+                        color = palette.accent,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = (14 * scale).sp
+                    )
+                    KaruiSubtleButton("Close", { showFrozenDialog = false })
+                }
+                Spacer(Modifier.height(10.dp))
+                KaruiDashedDivider()
+                Spacer(Modifier.height(10.dp))
+                if (resolvedFrozenApps.isEmpty()) {
+                    Text("No frozen apps.", color = palette.gray, fontSize = (12 * scale).sp)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.height(260.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(resolvedFrozenApps, key = { it.packageName }) { item ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(karuiShape())
+                                    .background(palette.bg)
+                                    .border(1.dp, palette.border, karuiShape())
+                                    .padding(10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .clip(frameShape)
+                                            .background(palette.surface)
+                                            .border(1.dp, palette.border, frameShape)
+                                            .padding(2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (item.icon != null) {
+                                            Image(item.icon, item.label, Modifier.fillMaxSize().clip(frameShape))
+                                        } else {
+                                            Icon(Icons.Rounded.Apps, null, tint = palette.accent, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(item.label, color = palette.text, fontSize = (13 * scale).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                }
+                                KaruiSubtleButton("Unfreeze", { onUnfreezeApp(item.packageName) })
                             }
                         }
                     }

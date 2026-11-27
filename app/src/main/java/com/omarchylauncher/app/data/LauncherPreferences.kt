@@ -236,6 +236,12 @@ class LauncherPreferences(private val context: Context) {
         }
     }
 
+    suspend fun setPinnedHomePackages(pkgs: List<String>) {
+        context.dataStore.edit { p ->
+            p[Keys.PINNED_HOME] = pkgs.distinct().joinToString(",")
+        }
+    }
+
     suspend fun setWidgetHeight(widgetId: Int, heightDp: Int) {
         context.dataStore.edit { p ->
             val map = parseIntMap(p[Keys.WIDGET_HEIGHTS]).toMutableMap()

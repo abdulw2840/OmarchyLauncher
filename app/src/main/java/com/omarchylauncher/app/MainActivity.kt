@@ -227,7 +227,7 @@ class MainActivity : ComponentActivity() {
                         onResizeWidget = viewModel::setWidgetHeight,
                         onAddPage = { viewModel.setExtraPagesCount(settings.extraPagesCount + 1) },
                         onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
-                        onReorderPinnedHome = viewModel::reorderPinnedHome,
+                        onSavePinnedOrder = viewModel::setPinnedHomePackages,
                         onLockScreen = viewModel::lockScreen,
                         onExpandNotifications = viewModel::expandNotifications,
                         onRefreshWeather = { viewModel.refreshWeather(silent = false) },
@@ -263,7 +263,8 @@ class MainActivity : ComponentActivity() {
                                 drawerOpen = false
                                 viewModel.launchHiddenApp(pkg)
                             },
-                            onUnhideApp = viewModel::toggleHiddenPackage
+                            onUnhideApp = viewModel::toggleHiddenPackage,
+                            onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) }
                         )
                     }
 
@@ -374,14 +375,23 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    // Karui Installed Widgets Picker Dialog
+                    // Karui Installed Widgets Picker Dialog (Searchable + Deduplicated)
                     if (showWidgetPicker) {
+                        var widgetQuery by remember { mutableStateOf("") }
                         val providers = remember {
                             runCatching {
-                                appWidgetManager.installedProviders.sortedBy {
-                                    it.loadLabel(packageManager).lowercase()
-                                }
+                                appWidgetManager.installedProviders
+                                    .distinctBy { "${it.provider.packageName}/${it.loadLabel(packageManager)}" }
+                                    .sortedBy { it.loadLabel(packageManager).lowercase() }
                             }.getOrDefault(emptyList())
+                        }
+                        val filteredProviders = remember(providers, widgetQuery) {
+                            val q = widgetQuery.trim()
+                            if (q.isEmpty()) providers
+                            else providers.filter {
+                                it.loadLabel(packageManager).contains(q, ignoreCase = true) ||
+                                    it.provider.packageName.contains(q, ignoreCase = true)
+                            }
                         }
                         Dialog(onDismissRequest = { showWidgetPicker = false }) {
                             Column(
@@ -392,20 +402,40 @@ class MainActivity : ComponentActivity() {
                                     .padding(14.dp)
                             ) {
                                 Text(
-                                    text = "ADD WIDGET (${providers.size})",
+                                    text = "ADD WIDGET (${filteredProviders.size})",
                                     color = palette.accent,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp
                                 )
                                 Spacer(Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(palette.bg)
+                                        .border(2.dp, palette.border, RectangleShape)
+                                        .padding(10.dp)
+                                ) {
+                                    if (widgetQuery.isEmpty()) {
+                                        Text("search widgets...", color = palette.gray, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                    }
+                                    BasicTextField(
+                                        value = widgetQuery,
+                                        onValueChange = { widgetQuery = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                        cursorBrush = SolidColor(palette.accent),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
                                 KaruiDashedDivider()
                                 Spacer(Modifier.height(8.dp))
                                 LazyColumn(
-                                    modifier = Modifier.height(340.dp),
+                                    modifier = Modifier.height(320.dp),
                                     verticalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    items(providers) { info ->
+                                    items(filteredProviders) { info ->
                                         val label = remember(info) { info.loadLabel(packageManager) }
                                         Row(
                                             modifier = Modifier
