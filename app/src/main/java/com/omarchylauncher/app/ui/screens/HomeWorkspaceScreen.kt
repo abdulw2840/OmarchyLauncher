@@ -601,7 +601,7 @@ fun HomeWorkspaceScreen(
                                                         activeDragOverlayPos = latestPointerInOverlay.get()
                                                     },
                                                     onDrag = {
-                                                        activeDragOverlayPos = latestPointerInOverlay
+                                                        activeDragOverlayPos = latestPointerInOverlay.get()
                                                         val gCoords = gridCoords ?: return@karuiAppHoldOrDrag
                                                         val hCoords = homeOverlayCoords ?: return@karuiAppHoldOrDrag
                                                         val currentIdx = localSlots.indexOfFirst { it?.packageName == draggingPkg }
@@ -965,10 +965,10 @@ fun HomeWorkspaceScreen(
                                                 lastDockPointerX = latestPointerInOverlay.get().x
                                                 dockSwapCount = 0
                                                 activeDragIsSystem = app.isSystem
-                                                activeDragOverlayPos = latestPointerInOverlay
+                                                activeDragOverlayPos = latestPointerInOverlay.get()
                                             },
                                             onDrag = {
-                                                activeDragOverlayPos = latestPointerInOverlay
+                                                activeDragOverlayPos = latestPointerInOverlay.get()
                                                 dockDragX += (latestPointerInOverlay.get().x - lastDockPointerX)
                                                 lastDockPointerX = latestPointerInOverlay.get().x
                                                 val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
