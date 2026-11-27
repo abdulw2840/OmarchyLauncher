@@ -4,6 +4,9 @@ import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
 import android.os.Bundle
 import android.text.format.DateFormat
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -38,6 +41,8 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.WbSunny
@@ -58,11 +63,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -115,6 +125,10 @@ fun HomeWorkspaceScreen(
     onRemovePage: () -> Unit,
     onSavePinnedOrder: (List<String>) -> Unit,
     onSaveDockOrder: (List<String>) -> Unit,
+    onMoveHomeToDock: (String) -> Unit,
+    onRemoveHomeApp: (String) -> Unit,
+    onRemoveDockApp: (String) -> Unit,
+    onUninstallApp: (String) -> Unit,
     onLockScreen: () -> Unit,
     onExpandNotifications: () -> Unit,
     onRefreshWeather: () -> Unit,
@@ -126,6 +140,12 @@ fun HomeWorkspaceScreen(
     val scale = LocalUiScale.current
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
+    val topDropLimitPx = with(density) { (contentPadding.calculateTopPadding() + 86.dp).toPx() }
+    var dockTopY by remember { mutableFloatStateOf(Float.MAX_VALUE) }
+    var activeDragRootPos by remember { mutableStateOf(Offset.Zero) }
+    var activeDragIsSystem by remember { mutableStateOf(false) }
 
     var showHomeMenu by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
@@ -345,10 +365,14 @@ fun HomeWorkspaceScreen(
                                 ) {
                                     itemsIndexed(localPinned, key = { _, app -> "${app.packageName}/${app.activityName}" }) { index, app ->
                                         val isDragging = draggingPkg == app.packageName
+                                        var itemRootPos by remember { mutableStateOf(Offset.Zero) }
                                         Box(
                                             modifier = Modifier
                                                 .then(if (!isDragging) Modifier.animateItem() else Modifier)
                                                 .zIndex(if (isDragging) 10f else 0f)
+                                                .onGloballyPositioned { coords ->
+                                                    itemRootPos = coords.positionInRoot()
+                                                }
                                                 .graphicsLayer {
                                                     if (isDragging) {
                                                         translationX = dragOffset.x
@@ -359,17 +383,20 @@ fun HomeWorkspaceScreen(
                                                 }
                                                 .pointerInput(app.packageName) {
                                                     detectDragGesturesAfterLongPress(
-                                                        onDragStart = {
+                                                        onDragStart = { offset ->
                                                             draggingPkg = app.packageName
                                                             dragOffset = Offset.Zero
                                                             totalDragDist = 0f
                                                             swapCount = 0
                                                             lastSwapTime = 0L
+                                                            activeDragIsSystem = app.isSystem
+                                                            activeDragRootPos = itemRootPos + offset
                                                         },
                                                         onDrag = { change, dragAmount ->
                                                             change.consume()
                                                             dragOffset += dragAmount
                                                             totalDragDist += dragAmount.getDistance()
+                                                            activeDragRootPos += dragAmount
 
                                                             val currentIdx = localPinned.indexOfFirst { it.packageName == draggingPkg }
                                                             if (currentIdx < 0) return@detectDragGesturesAfterLongPress
@@ -406,10 +433,25 @@ fun HomeWorkspaceScreen(
                                                             }
                                                         },
                                                         onDragEnd = {
-                                                            if (swapCount == 0 && totalDragDist < 14f) {
-                                                                onLongPressApp(app)
-                                                            } else if (swapCount > 0) {
-                                                                onSavePinnedOrder(localPinned.map { it.packageName })
+                                                            val droppedY = activeDragRootPos.y
+                                                            val droppedX = activeDragRootPos.x
+                                                            when {
+                                                                swapCount == 0 && totalDragDist < 14f -> {
+                                                                    onLongPressApp(app)
+                                                                }
+                                                                droppedY < topDropLimitPx -> {
+                                                                    if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
+                                                                        onUninstallApp(app.packageName)
+                                                                    } else {
+                                                                        onRemoveHomeApp(app.packageName)
+                                                                    }
+                                                                }
+                                                                settings.showDock && droppedY >= dockTopY -> {
+                                                                    onMoveHomeToDock(app.packageName)
+                                                                }
+                                                                swapCount > 0 -> {
+                                                                    onSavePinnedOrder(localPinned.map { it.packageName })
+                                                                }
                                                             }
                                                             draggingPkg = null
                                                             dragOffset = Offset.Zero
@@ -584,22 +626,30 @@ fun HomeWorkspaceScreen(
 
             if (settings.showDock && localDock.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(10.dp))
+                val dockHighlighted = draggingPkg != null && activeDragRootPos.y >= dockTopY
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .onGloballyPositioned { coords ->
+                            dockTopY = coords.positionInRoot().y
+                        }
                         .clip(karuiShape())
                         .background(palette.surface)
-                        .border(2.dp, palette.border, karuiShape())
-                        .padding(horizontal = 6.dp, vertical = 6.dp),
+                        .border(2.dp, if (dockHighlighted) palette.accent else palette.border, karuiShape())
+                        .padding(horizontal = 8.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     localDock.forEach { app ->
                         val isDockDragging = draggingDockPkg == app.packageName
+                        var dockItemRoot by remember { mutableStateOf(Offset.Zero) }
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .zIndex(if (isDockDragging) 10f else 0f)
+                                .onGloballyPositioned { coords ->
+                                    dockItemRoot = coords.positionInRoot()
+                                }
                                 .graphicsLayer {
                                     if (isDockDragging) {
                                         translationX = dockDragX
@@ -609,16 +659,19 @@ fun HomeWorkspaceScreen(
                                 }
                                 .pointerInput(app.packageName) {
                                     detectDragGesturesAfterLongPress(
-                                        onDragStart = {
+                                        onDragStart = { offset ->
                                             draggingDockPkg = app.packageName
                                             dockDragX = 0f
                                             dockTotalDist = 0f
                                             dockSwapCount = 0
+                                            activeDragIsSystem = app.isSystem
+                                            activeDragRootPos = dockItemRoot + offset
                                         },
                                         onDrag = { change, dragAmount ->
                                             change.consume()
                                             dockDragX += dragAmount.x
                                             dockTotalDist += dragAmount.getDistance()
+                                            activeDragRootPos += dragAmount
                                             val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
                                             val cellW = size.width.toFloat().coerceAtLeast(1f)
                                             if (curIdx >= 0) {
@@ -636,10 +689,22 @@ fun HomeWorkspaceScreen(
                                             }
                                         },
                                         onDragEnd = {
-                                            if (dockSwapCount == 0 && dockTotalDist < 14f) {
-                                                onLongPressApp(app)
-                                            } else if (dockSwapCount > 0) {
-                                                onSaveDockOrder(localDock.map { it.packageName })
+                                            val droppedY = activeDragRootPos.y
+                                            val droppedX = activeDragRootPos.x
+                                            when {
+                                                dockSwapCount == 0 && dockTotalDist < 14f -> {
+                                                    onLongPressApp(app)
+                                                }
+                                                droppedY < topDropLimitPx -> {
+                                                    if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
+                                                        onUninstallApp(app.packageName)
+                                                    } else {
+                                                        onRemoveDockApp(app.packageName)
+                                                    }
+                                                }
+                                                dockSwapCount > 0 -> {
+                                                    onSaveDockOrder(localDock.map { it.packageName })
+                                                }
                                             }
                                             draggingDockPkg = null
                                             dockDragX = 0f
@@ -666,6 +731,79 @@ fun HomeWorkspaceScreen(
                                 onLongClick = null
                             )
                         }
+                    }
+                }
+            }
+        }
+
+        // Top Action Drop Bar when dragging Home/Dock icon (Remove / Uninstall)
+        AnimatedVisibility(
+            visible = draggingPkg != null || draggingDockPkg != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            val inTopZone = activeDragRootPos.y < topDropLimitPx
+            val hoverRemove = inTopZone && (activeDragIsSystem || activeDragRootPos.x < screenWidthPx / 2f)
+            val hoverUninstall = inTopZone && !activeDragIsSystem && activeDragRootPos.x >= screenWidthPx / 2f
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(karuiShape())
+                        .background(if (hoverRemove) palette.accent else palette.surface)
+                        .border(2.dp, palette.border, karuiShape())
+                        .padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Remove",
+                        tint = if (hoverRemove) palette.accentTxt else palette.text,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "REMOVE",
+                        color = if (hoverRemove) palette.accentTxt else palette.text,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                if (!activeDragIsSystem) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(karuiShape())
+                            .background(if (hoverUninstall) Color(0xFFEF5350) else palette.surface)
+                            .border(2.dp, Color(0xFFEF5350), karuiShape())
+                            .padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = "Uninstall",
+                            tint = if (hoverUninstall) Color.White else Color(0xFFEF5350),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "UNINSTALL",
+                            color = if (hoverUninstall) Color.White else Color(0xFFEF5350),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }
@@ -787,6 +925,79 @@ fun HomeWorkspaceScreen(
                 }
             }
         }
+
+        // Top Action Drop Bar when dragging Home/Dock icon (Remove / Uninstall)
+        AnimatedVisibility(
+            visible = draggingPkg != null || draggingDockPkg != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            val inTopZone = activeDragRootPos.y < topDropLimitPx
+            val hoverRemove = inTopZone && (activeDragIsSystem || activeDragRootPos.x < screenWidthPx / 2f)
+            val hoverUninstall = inTopZone && !activeDragIsSystem && activeDragRootPos.x >= screenWidthPx / 2f
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(karuiShape())
+                        .background(if (hoverRemove) palette.accent else palette.surface)
+                        .border(2.dp, palette.border, karuiShape())
+                        .padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Remove",
+                        tint = if (hoverRemove) palette.accentTxt else palette.text,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "REMOVE",
+                        color = if (hoverRemove) palette.accentTxt else palette.text,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                if (!activeDragIsSystem) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(karuiShape())
+                            .background(if (hoverUninstall) Color(0xFFEF5350) else palette.surface)
+                            .border(2.dp, Color(0xFFEF5350), karuiShape())
+                            .padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = "Uninstall",
+                            tint = if (hoverUninstall) Color.White else Color(0xFFEF5350),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "UNINSTALL",
+                            color = if (hoverUninstall) Color.White else Color(0xFFEF5350),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            }
+        }
     }
 
     if (showCityDialog) {
@@ -835,6 +1046,79 @@ fun HomeWorkspaceScreen(
                         onSetWeatherCity(cityInput)
                         showCityDialog = false
                     }, Modifier.weight(1f))
+                }
+            }
+        }
+
+        // Top Action Drop Bar when dragging Home/Dock icon (Remove / Uninstall)
+        AnimatedVisibility(
+            visible = draggingPkg != null || draggingDockPkg != null,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            val inTopZone = activeDragRootPos.y < topDropLimitPx
+            val hoverRemove = inTopZone && (activeDragIsSystem || activeDragRootPos.x < screenWidthPx / 2f)
+            val hoverUninstall = inTopZone && !activeDragIsSystem && activeDragRootPos.x >= screenWidthPx / 2f
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(karuiShape())
+                        .background(if (hoverRemove) palette.accent else palette.surface)
+                        .border(2.dp, palette.border, karuiShape())
+                        .padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Remove",
+                        tint = if (hoverRemove) palette.accentTxt else palette.text,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "REMOVE",
+                        color = if (hoverRemove) palette.accentTxt else palette.text,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
+
+                if (!activeDragIsSystem) {
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(karuiShape())
+                            .background(if (hoverUninstall) Color(0xFFEF5350) else palette.surface)
+                            .border(2.dp, Color(0xFFEF5350), karuiShape())
+                            .padding(vertical = 10.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.DeleteOutline,
+                            contentDescription = "Uninstall",
+                            tint = if (hoverUninstall) Color.White else Color(0xFFEF5350),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "UNINSTALL",
+                            color = if (hoverUninstall) Color.White else Color(0xFFEF5350),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         }

@@ -67,7 +67,9 @@ data class LauncherSettings(
     val frozenPackages: Set<String> = emptySet(),
     val widgetIds: List<Int> = emptyList(),
     val widgetHeights: Map<Int, Int> = emptyMap(),
-    val widgetHalfWidth: Set<Int> = emptySet()
+    val widgetHalfWidth: Set<Int> = emptySet(),
+    val customLabels: Map<String, String> = emptyMap(),
+    val customIcons: Map<String, String> = emptyMap()
 )
 
 class LauncherPreferences(private val context: Context) {
@@ -112,6 +114,8 @@ class LauncherPreferences(private val context: Context) {
         val WIDGET_IDS = stringPreferencesKey("widget_ids_csv")
         val WIDGET_HEIGHTS = stringPreferencesKey("widget_heights_csv")
         val WIDGET_HALF_WIDTH = stringSetPreferencesKey("widget_half_width")
+        val CUSTOM_LABELS = stringPreferencesKey("custom_labels_json")
+        val CUSTOM_ICONS = stringPreferencesKey("custom_icons_json")
     }
 
     val settingsFlow: Flow<LauncherSettings> = context.dataStore.data.map { p ->
@@ -162,8 +166,18 @@ class LauncherPreferences(private val context: Context) {
             frozenPackages = p[Keys.FROZEN_PKGS] ?: emptySet(),
             widgetIds = parseIntCsv(p[Keys.WIDGET_IDS]),
             widgetHeights = parseIntMap(p[Keys.WIDGET_HEIGHTS]),
-            widgetHalfWidth = (p[Keys.WIDGET_HALF_WIDTH] ?: emptySet()).mapNotNull { it.toIntOrNull() }.toSet()
+            widgetHalfWidth = (p[Keys.WIDGET_HALF_WIDTH] ?: emptySet()).mapNotNull { it.toIntOrNull() }.toSet(),
+            customLabels = parseStringMap(p[Keys.CUSTOM_LABELS]),
+            customIcons = parseStringMap(p[Keys.CUSTOM_ICONS])
         )
+    }
+
+    private fun parseStringMap(raw: String?): Map<String, String> {
+        if (raw.isNullOrBlank()) return emptyMap()
+        return runCatching {
+            val obj = org.json.JSONObject(raw)
+            obj.keys().asSequence().associateWith { obj.optString(it, "") }.filterValues { it.isNotEmpty() }
+        }.getOrDefault(emptyMap())
     }
 
     private fun parseIntMap(raw: String?): Map<Int, Int> {
@@ -281,6 +295,43 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setWidgetOrder(ids: List<Int>) {
         context.dataStore.edit { p ->
             p[Keys.WIDGET_IDS] = ids.distinct().joinToString(",")
+        }
+    }
+
+    suspend fun removePinnedHome(pkg: String) {
+        context.dataStore.edit { p ->
+            val list = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
+            list.remove(pkg)
+            p[Keys.PINNED_HOME] = list.joinToString(",")
+        }
+    }
+
+    suspend fun moveHomeToDock(pkg: String) {
+        context.dataStore.edit { p ->
+            val home = parseCsv(p[Keys.PINNED_HOME]).toMutableList()
+            home.remove(pkg)
+            p[Keys.PINNED_HOME] = home.joinToString(",")
+            val dock = parseCsv(p[Keys.DOCK_PKGS]).toMutableList()
+            if (!dock.contains(pkg) && dock.size < 6) {
+                dock.add(pkg)
+                p[Keys.DOCK_PKGS] = dock.joinToString(",")
+            }
+        }
+    }
+
+    suspend fun setCustomLabel(pkg: String, label: String?) {
+        context.dataStore.edit { p ->
+            val map = parseStringMap(p[Keys.CUSTOM_LABELS]).toMutableMap()
+            if (label.isNullOrBlank()) map.remove(pkg) else map[pkg] = label.trim()
+            p[Keys.CUSTOM_LABELS] = org.json.JSONObject(map as Map<*, *>).toString()
+        }
+    }
+
+    suspend fun setCustomIcon(pkg: String, iconSpec: String?) {
+        context.dataStore.edit { p ->
+            val map = parseStringMap(p[Keys.CUSTOM_ICONS]).toMutableMap()
+            if (iconSpec.isNullOrBlank()) map.remove(pkg) else map[pkg] = iconSpec
+            p[Keys.CUSTOM_ICONS] = org.json.JSONObject(map as Map<*, *>).toString()
         }
     }
 

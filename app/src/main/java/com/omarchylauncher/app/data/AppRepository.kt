@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Process
 import android.os.UserHandle
 import android.provider.Settings
+import org.xmlpull.v1.XmlPullParser
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
@@ -40,6 +41,11 @@ data class HiddenAppInfo(
     val packageName: String,
     val label: String,
     val icon: ImageBitmap?
+)
+
+data class IconPackInfo(
+    val packageName: String,
+    val label: String
 )
 
 class AppRepository(private val context: Context) {
@@ -166,5 +172,66 @@ class AppRepository(private val context: Context) {
             } else null
             HiddenAppInfo(packageName = pkg, label = label, icon = icon)
         }.sortedBy { it.label.lowercase() }
+    }
+
+    fun getInstalledIconPacks(): List<IconPackInfo> {
+        val pm = context.packageManager
+        val actions = listOf(
+            "org.adw.launcher.THEMES",
+            "com.novalauncher.THEME",
+            "app.lawnchair.icons.THEMED_ICON",
+            "com.gau.go.launcherex.theme",
+            "com.teslacoilsw.launcher.THEME"
+        )
+        val packs = mutableMapOf<String, IconPackInfo>()
+        actions.forEach { action ->
+            val resolved = runCatching {
+                pm.queryIntentActivities(Intent(action), PackageManager.MATCH_DEFAULT_ONLY)
+            }.getOrDefault(emptyList())
+            resolved.forEach { ri ->
+                val pkg = ri.activityInfo.packageName
+                if (!packs.containsKey(pkg)) {
+                    val label = runCatching { ri.loadLabel(pm).toString() }.getOrDefault(pkg)
+                    packs[pkg] = IconPackInfo(pkg, label)
+                }
+            }
+        }
+        return packs.values.sortedBy { it.label.lowercase() }
+    }
+
+    fun loadIconPackDrawables(packPkg: String): List<String> {
+        return runCatching {
+            val res = context.packageManager.getResourcesForApplication(packPkg)
+            val xmlId = listOf("appfilter", "drawable").firstNotNullOfOrNull { name ->
+                val id = res.getIdentifier(name, "xml", packPkg)
+                if (id != 0) id else null
+            } ?: return emptyList()
+
+            val drawables = LinkedHashSet<String>()
+            val parser = res.getXml(xmlId)
+            var eventType = parser.eventType
+            while (eventType != XmlPullParser.END_DOCUMENT && drawables.size < 600) {
+                if (eventType == XmlPullParser.START_TAG) {
+                    val d = parser.getAttributeValue(null, "drawable")
+                    if (!d.isNullOrBlank()) drawables.add(d)
+                }
+                eventType = parser.next()
+            }
+            drawables.toList()
+        }.getOrDefault(emptyList())
+    }
+
+    fun loadIconFromSpec(spec: String): ImageBitmap? {
+        val parts = spec.split("/", limit = 2)
+        if (parts.size != 2) return null
+        val packPkg = parts[0]
+        val drawableName = parts[1]
+        return runCatching {
+            val res = context.packageManager.getResourcesForApplication(packPkg)
+            val id = res.getIdentifier(drawableName, "drawable", packPkg)
+            if (id == 0) return null
+            val drawable = res.getDrawable(id, null) ?: return null
+            drawable.toBitmap(96, 96).asImageBitmap()
+        }.getOrNull()
     }
 }

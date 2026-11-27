@@ -72,13 +72,34 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
 
     val pinnedHomeApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
-        s.pinnedHomePackages.distinct().mapNotNull { map[it] }
+        s.pinnedHomePackages.distinct().mapNotNull { pkg ->
+            map[pkg]?.let { applyOverrides(it, s) }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val dockApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
         val map = allApps.associateBy { it.packageName }
-        s.dockPackages.distinct().mapNotNull { map[it] }
+        s.dockPackages.distinct().mapNotNull { pkg ->
+            map[pkg]?.let { applyOverrides(it, s) }
+        }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val overriddenApps: StateFlow<List<AppEntry>> = combine(apps, settings) { allApps, s ->
+        allApps.map { applyOverrides(it, s) }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private fun applyOverrides(entry: AppEntry, s: LauncherSettings): AppEntry {
+        val customLbl = s.customLabels[entry.packageName]
+        val customIcoSpec = s.customIcons[entry.packageName]
+        val customBitmap = if (!customIcoSpec.isNullOrBlank()) {
+            app.appRepository.loadIconFromSpec(customIcoSpec)
+        } else null
+        return entry.copy(
+            label = customLbl ?: entry.label,
+            icon = customBitmap ?: entry.icon,
+            monochromeIcon = if (customBitmap != null) customBitmap else entry.monochromeIcon
+        )
+    }
 
     private var latestSensorSteps: Int = -1
     private val stepPrefs by lazy { app.getSharedPreferences("omarchy_steps", Context.MODE_PRIVATE) }
@@ -425,6 +446,15 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun setWidgetHeight(widgetId: Int, heightDp: Int) = viewModelScope.launch { app.preferences.setWidgetHeight(widgetId, heightDp) }
     fun setWidgetHalfWidth(widgetId: Int, half: Boolean) = viewModelScope.launch { app.preferences.setWidgetHalfWidth(widgetId, half) }
     fun setWidgetOrder(ids: List<Int>) = viewModelScope.launch { app.preferences.setWidgetOrder(ids) }
+    fun removePinnedHome(pkg: String) = viewModelScope.launch { app.preferences.removePinnedHome(pkg) }
+    fun moveHomeToDock(pkg: String) = viewModelScope.launch { app.preferences.moveHomeToDock(pkg) }
+    fun setCustomLabel(pkg: String, label: String?) = viewModelScope.launch { app.preferences.setCustomLabel(pkg, label) }
+    fun setCustomIcon(pkg: String, iconSpec: String?) = viewModelScope.launch { app.preferences.setCustomIcon(pkg, iconSpec) }
+    fun getInstalledIconPacks() = app.appRepository.getInstalledIconPacks()
+    suspend fun getIconPackDrawables(packPkg: String) = withContext(Dispatchers.IO) {
+        app.appRepository.loadIconPackDrawables(packPkg)
+    }
+    fun loadIconFromSpec(spec: String) = app.appRepository.loadIconFromSpec(spec)
     fun setSolidBackground(v: Boolean) = viewModelScope.launch { app.preferences.setSolidBackground(v) }
     fun setWallpaperDimAlpha(v: Float) = viewModelScope.launch { app.preferences.setWallpaperDimAlpha(v) }
     fun setGridColumns(v: Int) = viewModelScope.launch { app.preferences.setGridColumns(v) }

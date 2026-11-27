@@ -92,9 +92,11 @@ fun KaruiAppTile(
 
     Column(
         modifier = modifier
+            .fillMaxWidth()
             .then(clickModifier)
-            .padding(vertical = 6.dp, horizontal = 4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(vertical = 4.dp, horizontal = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
         Box(
             modifier = Modifier
@@ -154,6 +156,7 @@ fun KaruiAppContextDialog(
     onToggleDock: () -> Unit,
     onToggleHidden: () -> Unit,
     onOpenInfo: () -> Unit,
+    onEditIconLabel: () -> Unit,
     onForceStop: () -> Unit,
     onFreeze: () -> Unit,
     onUninstall: (useRoot: Boolean) -> Unit
@@ -218,7 +221,28 @@ fun KaruiAppContextDialog(
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 MenuActionButton(
-                    label = if (isPinnedHome) "Unpin Home" else "Pin Home",
+                    label = "App Info",
+                    onClick = { onDismiss(); onOpenInfo() },
+                    modifier = Modifier.weight(1f)
+                )
+                if (!app.isSystem) {
+                    MenuActionButton(
+                        label = "Uninstall",
+                        onClick = { onDismiss(); onUninstall(false) },
+                        isDanger = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MenuActionButton(
+                    label = if (isPinnedHome) "Remove" else "Pin Home",
                     onClick = { onTogglePinHome(); onDismiss() },
                     modifier = Modifier.weight(1f)
                 )
@@ -241,8 +265,8 @@ fun KaruiAppContextDialog(
                     modifier = Modifier.weight(1f)
                 )
                 MenuActionButton(
-                    label = "App Info",
-                    onClick = { onDismiss(); onOpenInfo() },
+                    label = "Edit Icon",
+                    onClick = { onDismiss(); onEditIconLabel() },
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -276,11 +300,11 @@ fun KaruiAppContextDialog(
                 }
             }
 
-            if (!app.isSystem || isRootAvailable) {
+            if (isRootAvailable && app.isSystem) {
                 Spacer(modifier = Modifier.height(6.dp))
                 MenuActionButton(
-                    label = if (isRootAvailable && app.isSystem) "Root Uninstall" else "Uninstall",
-                    onClick = { onDismiss(); onUninstall(isRootAvailable) },
+                    label = "Root Uninstall",
+                    onClick = { onDismiss(); onUninstall(true) },
                     isDanger = true
                 )
             }

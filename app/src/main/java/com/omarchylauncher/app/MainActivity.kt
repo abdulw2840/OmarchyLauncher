@@ -20,6 +20,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -37,8 +38,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -68,12 +73,15 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.omarchylauncher.app.data.AppEntry
+import com.omarchylauncher.app.data.IconPackInfo
 import com.omarchylauncher.app.ui.LauncherViewModel
 import com.omarchylauncher.app.ui.components.KaruiAppContextDialog
 import com.omarchylauncher.app.ui.components.KaruiAppTile
 import com.omarchylauncher.app.ui.components.KaruiButton
+import com.omarchylauncher.app.ui.components.KaruiChip
 import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
+import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.screens.AppDrawerScreen
 import com.omarchylauncher.app.ui.screens.HomeWorkspaceScreen
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
@@ -166,7 +174,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
-            val apps by viewModel.apps.collectAsStateWithLifecycle()
+            val apps by viewModel.overriddenApps.collectAsStateWithLifecycle()
             val isLoadingApps by viewModel.isLoadingApps.collectAsStateWithLifecycle()
             val privilegeStatus by viewModel.privilegeStatus.collectAsStateWithLifecycle()
             val clockState by viewModel.clockState.collectAsStateWithLifecycle()
@@ -177,6 +185,7 @@ class MainActivity : ComponentActivity() {
             var drawerOpen by remember { mutableStateOf(false) }
             var focusDrawerSearch by remember { mutableStateOf(false) }
             var contextApp by remember { mutableStateOf<AppEntry?>(null) }
+            var editingApp by remember { mutableStateOf<AppEntry?>(null) }
             var pendingHidePkgForPin by remember { mutableStateOf<String?>(null) }
             var showWidgetPicker by remember { mutableStateOf(false) }
             var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
@@ -239,6 +248,10 @@ class MainActivity : ComponentActivity() {
                         onRemovePage = { viewModel.setExtraPagesCount((settings.extraPagesCount - 1).coerceAtLeast(0)) },
                         onSavePinnedOrder = viewModel::setPinnedHomePackages,
                         onSaveDockOrder = viewModel::setDockPackages,
+                        onMoveHomeToDock = viewModel::moveHomeToDock,
+                        onRemoveHomeApp = viewModel::removePinnedHome,
+                        onRemoveDockApp = viewModel::toggleDockPackage,
+                        onUninstallApp = { pkg -> viewModel.uninstallApp(pkg, useRoot = false) },
                         onLockScreen = viewModel::lockScreen,
                         onExpandNotifications = viewModel::expandNotifications,
                         onRefreshWeather = { viewModel.refreshWeather(silent = false) },
@@ -352,10 +365,149 @@ class MainActivity : ComponentActivity() {
                                 }
                             },
                             onOpenInfo = { viewModel.openAppInfo(target) },
+                            onEditIconLabel = { editingApp = target },
                             onForceStop = { viewModel.forceStopApp(target.packageName) },
                             onFreeze = { viewModel.freezeApp(target.packageName, true) },
                             onUninstall = { useRoot -> viewModel.uninstallApp(target.packageName, useRoot) }
                         )
+                    }
+
+                    // Edit Icon & Label + Icon Pack Picker Dialog
+                    editingApp?.let { target ->
+                        var labelDraft by remember(target.packageName) { mutableStateOf(target.label) }
+                        val iconPacks = remember { viewModel.getInstalledIconPacks() }
+                        var selectedPack by remember { mutableStateOf<IconPackInfo?>(iconPacks.firstOrNull()) }
+                        var packDrawables by remember { mutableStateOf<List<String>>(emptyList()) }
+                        var iconSearch by remember { mutableStateOf("") }
+
+                        LaunchedEffect(selectedPack) {
+                            packDrawables = selectedPack?.let { viewModel.getIconPackDrawables(it.packageName) } ?: emptyList()
+                        }
+
+                        val filteredDrawables = remember(packDrawables, iconSearch) {
+                            val q = iconSearch.trim()
+                            if (q.isEmpty()) packDrawables.take(120)
+                            else packDrawables.filter { it.contains(q, ignoreCase = true) }.take(120)
+                        }
+
+                        Dialog(onDismissRequest = { editingApp = null }) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(palette.surface)
+                                    .border(2.dp, palette.border, karuiShape())
+                                    .padding(14.dp)
+                            ) {
+                                Text(
+                                    text = "EDIT ICON & NAME",
+                                    color = palette.accent,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(palette.bg)
+                                        .border(2.dp, palette.border, karuiShape())
+                                        .padding(10.dp)
+                                ) {
+                                    BasicTextField(
+                                        value = labelDraft,
+                                        onValueChange = { labelDraft = it },
+                                        singleLine = true,
+                                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
+                                        cursorBrush = SolidColor(palette.accent),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    KaruiSubtleButton("Reset Icon", {
+                                        viewModel.setCustomIcon(target.packageName, null)
+                                    }, Modifier.weight(1f))
+                                    KaruiButton("Save Name", {
+                                        viewModel.setCustomLabel(target.packageName, labelDraft)
+                                        editingApp = null
+                                    }, Modifier.weight(1f))
+                                }
+
+                                Spacer(Modifier.height(10.dp))
+                                KaruiDashedDivider()
+                                Spacer(Modifier.height(8.dp))
+
+                                if (iconPacks.isEmpty()) {
+                                    Text(
+                                        text = "No external icon packs installed (e.g. Lawnicons, Material You packs).",
+                                        color = palette.gray,
+                                        fontSize = 12.sp
+                                    )
+                                } else {
+                                    Text("ICON PACKS (${iconPacks.size})", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Spacer(Modifier.height(6.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        iconPacks.take(3).forEach { pack ->
+                                            KaruiChip(
+                                                label = pack.label,
+                                                selected = selectedPack?.packageName == pack.packageName,
+                                                onClick = { selectedPack = pack },
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(palette.bg)
+                                            .border(1.dp, palette.border, karuiShape())
+                                            .padding(8.dp)
+                                    ) {
+                                        if (iconSearch.isEmpty()) {
+                                            Text("search pack icons...", color = palette.gray, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                                        }
+                                        BasicTextField(
+                                            value = iconSearch,
+                                            onValueChange = { iconSearch = it },
+                                            singleLine = true,
+                                            textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 12.sp),
+                                            cursorBrush = SolidColor(palette.accent),
+                                            modifier = Modifier.fillMaxWidth()
+                                        )
+                                    }
+                                    Spacer(Modifier.height(8.dp))
+                                    LazyVerticalGrid(
+                                        columns = GridCells.Fixed(4),
+                                        modifier = Modifier.height(210.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        items(filteredDrawables) { dName ->
+                                            val spec = "${selectedPack?.packageName}/$dName"
+                                            val bmp = remember(spec) { viewModel.loadIconFromSpec(spec) }
+                                            if (bmp != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(48.dp)
+                                                        .background(palette.bg)
+                                                        .border(1.dp, palette.border, karuiShape())
+                                                        .clickable {
+                                                            viewModel.setCustomIcon(target.packageName, spec)
+                                                            editingApp = null
+                                                        }
+                                                        .padding(6.dp)
+                                                ) {
+                                                    Image(bmp, dName, Modifier.fillMaxSize())
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                KaruiSubtleButton("Close", { editingApp = null }, Modifier.fillMaxWidth())
+                            }
+                        }
                     }
 
                     // First-time Set PIN popup when hiding first app
