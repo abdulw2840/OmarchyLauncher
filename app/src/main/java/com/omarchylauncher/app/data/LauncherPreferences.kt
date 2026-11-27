@@ -64,6 +64,7 @@ data class LauncherSettings(
     val pinnedHomePackages: List<String> = emptyList(),
     val dockPackages: List<String> = emptyList(),
     val hiddenPackages: Set<String> = emptySet(),
+    val frozenPackages: Set<String> = emptySet(),
     val widgetIds: List<Int> = emptyList(),
     val widgetHeights: Map<Int, Int> = emptyMap()
 )
@@ -106,6 +107,7 @@ class LauncherPreferences(private val context: Context) {
         val PINNED_HOME = stringPreferencesKey("pinned_home_csv")
         val DOCK_PKGS = stringPreferencesKey("dock_pkgs_csv")
         val HIDDEN_PKGS = stringSetPreferencesKey("hidden_pkgs")
+        val FROZEN_PKGS = stringSetPreferencesKey("frozen_pkgs")
         val WIDGET_IDS = stringPreferencesKey("widget_ids_csv")
         val WIDGET_HEIGHTS = stringPreferencesKey("widget_heights_csv")
     }
@@ -155,6 +157,7 @@ class LauncherPreferences(private val context: Context) {
             pinnedHomePackages = parseCsv(p[Keys.PINNED_HOME]),
             dockPackages = parseCsv(p[Keys.DOCK_PKGS]),
             hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet(),
+            frozenPackages = p[Keys.FROZEN_PKGS] ?: emptySet(),
             widgetIds = parseIntCsv(p[Keys.WIDGET_IDS]),
             widgetHeights = parseIntMap(p[Keys.WIDGET_HEIGHTS])
         )
@@ -254,6 +257,14 @@ class LauncherPreferences(private val context: Context) {
             val set = (p[Keys.HIDDEN_PKGS] ?: emptySet()).toMutableSet()
             if (hide) set.add(pkg) else set.remove(pkg)
             p[Keys.HIDDEN_PKGS] = set
+        }
+    }
+
+    suspend fun setPackageFrozen(pkg: String, frozen: Boolean) {
+        context.dataStore.edit { p ->
+            val set = (p[Keys.FROZEN_PKGS] ?: emptySet()).toMutableSet()
+            if (frozen) set.add(pkg) else set.remove(pkg)
+            p[Keys.FROZEN_PKGS] = set
         }
     }
 

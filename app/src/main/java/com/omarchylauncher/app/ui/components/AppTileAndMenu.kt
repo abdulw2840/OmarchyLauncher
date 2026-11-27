@@ -62,7 +62,7 @@ fun KaruiAppTile(
     iconShape: IconShape = IconShape.SQUARE,
     iconSize: Dp = 44.dp,
     onClick: () -> Unit,
-    onLongClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val palette = LocalKaruiPalette.current
@@ -74,15 +74,21 @@ fun KaruiAppTile(
         ColorFilter.colorMatrix(ColorMatrix().apply { setToSaturation(0f) })
     } else null
 
+    val clickModifier = if (onLongClick != null) {
+        Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = {
+                if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                onLongClick()
+            }
+        )
+    } else {
+        Modifier.clickable(onClick = onClick)
+    }
+
     Column(
         modifier = modifier
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = {
-                    if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onLongClick()
-                }
-            )
+            .then(clickModifier)
             .padding(vertical = 6.dp, horizontal = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {

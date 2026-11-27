@@ -383,7 +383,7 @@ fun HomeWorkspaceScreen(
                                                 iconShape = settings.iconShape,
                                                 iconSize = settings.iconSizeDp.dp,
                                                 onClick = { onLaunchApp(app) },
-                                                onLongClick = { onLongPressApp(app) }
+                                                onLongClick = null
                                             )
                                         }
                                     }
@@ -405,14 +405,13 @@ fun HomeWorkspaceScreen(
                                         runCatching { appWidgetManager.getAppWidgetInfo(widgetId) }.getOrNull()
                                     }
                                     val customHeight = settings.widgetHeights[widgetId]
-                                        ?: (info?.minHeight?.coerceIn(100, 260) ?: 160)
+                                        ?: (info?.minHeight?.coerceIn(48, 260) ?: 100)
 
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .clip(karuiShape())
-                                            .background(palette.surface)
-                                            .border(2.dp, palette.border, karuiShape())
+                                            .border(1.dp, palette.border, karuiShape())
                                             .combinedClickable(
                                                 onClick = {},
                                                 onLongClick = { widgetToManage = widgetId }
@@ -615,7 +614,7 @@ fun HomeWorkspaceScreen(
                 Text("RESIZE HEIGHT", color = palette.gray, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("S" to 120, "M" to 200, "L" to 300, "XL" to 400).forEach { (lbl, h) ->
+                    listOf("S" to 64, "M" to 110, "L" to 180, "XL" to 260).forEach { (lbl, h) ->
                         KaruiChip(lbl, curHeight == h, { onResizeWidget(wId, h) }, Modifier.weight(1f))
                     }
                 }

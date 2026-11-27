@@ -31,6 +31,12 @@ class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        runCatching {
+            val mode = display?.supportedModes?.maxByOrNull { it.refreshRate }
+            if (mode != null) {
+                window.attributes = window.attributes.apply { preferredDisplayModeId = mode.modeId }
+            }
+        }
 
         setContent {
             val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -83,7 +89,9 @@ class SettingsActivity : ComponentActivity() {
                     onSetSolidBg = viewModel::setSolidBackground,
                     onSetWallpaperDim = viewModel::setWallpaperDimAlpha,
                     onSetUiScale = viewModel::setUiScale,
-                    onSetCornerRadiusDp = viewModel::setCornerRadiusDp
+                    onSetCornerRadiusDp = viewModel::setCornerRadiusDp,
+                    onResolveFrozenApps = viewModel::getHiddenAppDetails,
+                    onUnfreezeApp = { viewModel.freezeApp(it, false) }
                 )
             }
         }

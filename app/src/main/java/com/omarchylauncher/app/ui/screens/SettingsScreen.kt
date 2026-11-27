@@ -1,5 +1,6 @@
 package com.omarchylauncher.app.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,14 +15,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +48,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.omarchylauncher.app.data.HiddenAppInfo
 import com.omarchylauncher.app.data.IconShape
 import com.omarchylauncher.app.data.LauncherSettings
 import com.omarchylauncher.app.data.WebSearchProvider
@@ -52,6 +60,7 @@ import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiPivotHeader
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
 import com.omarchylauncher.app.ui.components.KaruiSwitch
+import com.omarchylauncher.app.ui.components.iconShapeToComposeShape
 import com.omarchylauncher.app.ui.components.karuiShape
 import com.omarchylauncher.app.ui.theme.KaruiThemes
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
@@ -94,7 +103,9 @@ fun SettingsScreen(
     onSetSolidBg: (Boolean) -> Unit,
     onSetWallpaperDim: (Float) -> Unit,
     onSetUiScale: (Float) -> Unit,
-    onSetCornerRadiusDp: (Int) -> Unit
+    onSetCornerRadiusDp: (Int) -> Unit,
+    onResolveFrozenApps: suspend (Set<String>) -> List<HiddenAppInfo>,
+    onUnfreezeApp: (String) -> Unit
 ) {
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
@@ -305,10 +316,12 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
-                            Text("DRAWER BACKGROUND OPACITY (${(settings.drawerBgAlpha * 100).toInt()}%)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            var drawerAlphaDraft by remember(settings.drawerBgAlpha) { mutableFloatStateOf(settings.drawerBgAlpha) }
+                            Text("DRAWER BACKGROUND OPACITY (${(drawerAlphaDraft * 100).toInt()}%)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
                             Slider(
-                                value = settings.drawerBgAlpha,
-                                onValueChange = onSetDrawerBgAlpha,
+                                value = drawerAlphaDraft,
+                                onValueChange = { drawerAlphaDraft = it },
+                                onValueChangeFinished = { onSetDrawerBgAlpha(drawerAlphaDraft) },
                                 valueRange = 0.4f..1.0f,
                                 colors = SliderDefaults.colors(
                                     thumbColor = palette.accent,
@@ -414,6 +427,59 @@ fun SettingsScreen(
                             }
                         }
                     }
+                    item {
+                        var frozenAppsList by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
+                        LaunchedEffect(settings.frozenPackages) {
+                            frozenAppsList = if (settings.frozenPackages.isNotEmpty()) {
+                                onResolveFrozenApps(settings.frozenPackages)
+                            } else emptyList()
+                        }
+                        KaruiBox(title = "Frozen Apps (${frozenAppsList.size})") {
+                            if (frozenAppsList.isEmpty()) {
+                                Text("No frozen apps.", color = palette.gray, fontSize = (12 * scale).sp)
+                            } else {
+                                val frameShape = iconShapeToComposeShape(settings.iconShape)
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    frozenAppsList.forEach { item ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(karuiShape())
+                                                .background(palette.surface)
+                                                .border(1.dp, palette.border, karuiShape())
+                                                .padding(10.dp),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(28.dp)
+                                                        .clip(frameShape)
+                                                        .background(palette.bg)
+                                                        .border(1.dp, palette.border, frameShape)
+                                                        .padding(2.dp),
+                                                    contentAlignment = Alignment.Center
+                                                ) {
+                                                    if (item.icon != null) {
+                                                        Image(item.icon, item.label, Modifier.fillMaxSize().clip(frameShape))
+                                                    } else {
+                                                        Icon(Icons.Rounded.Apps, null, tint = palette.accent, modifier = Modifier.size(16.dp))
+                                                    }
+                                                }
+                                                Spacer(Modifier.width(10.dp))
+                                                Text(item.label, color = palette.text, fontSize = (13 * scale).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            }
+                                            KaruiSubtleButton("Unfreeze", { onUnfreezeApp(item.packageName) })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
                 3 -> {
                     item {
@@ -421,10 +487,12 @@ fun SettingsScreen(
                             ToggleRow("Solid Omarchy Background", "Use pure theme background instead of wallpaper", settings.solidBackground, onSetSolidBg)
                             if (!settings.solidBackground) {
                                 Spacer(modifier = Modifier.height(10.dp))
-                                Text("WALLPAPER DIM OVERLAY (${(settings.wallpaperDimAlpha * 100).toInt()}%)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                                var dimDraft by remember(settings.wallpaperDimAlpha) { mutableFloatStateOf(settings.wallpaperDimAlpha) }
+                                Text("WALLPAPER DIM OVERLAY (${(dimDraft * 100).toInt()}%)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
                                 Slider(
-                                    value = settings.wallpaperDimAlpha,
-                                    onValueChange = onSetWallpaperDim,
+                                    value = dimDraft,
+                                    onValueChange = { dimDraft = it },
+                                    onValueChangeFinished = { onSetWallpaperDim(dimDraft) },
                                     valueRange = 0.2f..0.95f,
                                     colors = SliderDefaults.colors(
                                         thumbColor = palette.accent,
@@ -446,10 +514,12 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
-                            Text("CORNER ROUNDNESS (${settings.cornerRadiusDp}dp)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            var radiusDraft by remember(settings.cornerRadiusDp) { mutableFloatStateOf(settings.cornerRadiusDp.toFloat()) }
+                            Text("CORNER ROUNDNESS (${radiusDraft.toInt()}dp)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
                             Slider(
-                                value = settings.cornerRadiusDp.toFloat(),
-                                onValueChange = { onSetCornerRadiusDp(it.toInt()) },
+                                value = radiusDraft,
+                                onValueChange = { radiusDraft = it },
+                                onValueChangeFinished = { onSetCornerRadiusDp(radiusDraft.toInt()) },
                                 valueRange = 0f..24f,
                                 colors = SliderDefaults.colors(
                                     thumbColor = palette.accent,

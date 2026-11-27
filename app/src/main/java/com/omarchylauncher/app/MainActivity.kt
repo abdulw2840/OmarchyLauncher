@@ -148,6 +148,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        runCatching {
+            val mode = display?.supportedModes?.maxByOrNull { it.refreshRate }
+            if (mode != null) {
+                window.attributes = window.attributes.apply { preferredDisplayModeId = mode.modeId }
+            }
+        }
 
         appWidgetManager = AppWidgetManager.getInstance(this)
         appWidgetHost = AppWidgetHost(this, 1024)

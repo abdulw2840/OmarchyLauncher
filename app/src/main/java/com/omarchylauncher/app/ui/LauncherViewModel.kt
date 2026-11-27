@@ -294,7 +294,10 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
     fun freezeApp(packageName: String, freeze: Boolean) {
         viewModelScope.launch {
             val ok = app.privilegeController.freezeApp(packageName, freeze)
-            if (ok) app.appRepository.refresh()
+            if (ok) {
+                app.preferences.setPackageFrozen(packageName, freeze)
+                app.appRepository.refresh()
+            }
             Toast.makeText(
                 app,
                 if (ok) (if (freeze) "Frozen $packageName" else "Unfrozen $packageName")
