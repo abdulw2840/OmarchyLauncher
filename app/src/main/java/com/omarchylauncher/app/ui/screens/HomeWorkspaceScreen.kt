@@ -17,6 +17,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +46,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Apps
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -66,9 +69,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
@@ -157,14 +164,16 @@ fun HomeWorkspaceScreen(
     val density = LocalDensity.current
     val screenWidthPx = with(density) { LocalConfiguration.current.screenWidthDp.dp.toPx() }
     val topDropLimitPx = with(density) { (contentPadding.calculateTopPadding() + 86.dp).toPx() }
-    var homeOverlayOrigin by remember { mutableStateOf(Offset.Zero) }
+    var homeOverlayCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    var latestPointerInOverlay by remember { mutableStateOf(Offset.Zero) }
     var gridCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
     var dockTopY by remember { mutableFloatStateOf(Float.MAX_VALUE) }
-    var activeDragRootPos by remember { mutableStateOf(Offset.Zero) }
+    var activeDragOverlayPos by remember { mutableStateOf(Offset.Zero) }
     var activeDragIsSystem by remember { mutableStateOf(false) }
     var activeDragApp by remember { mutableStateOf<AppEntry?>(null) }
 
     var showHomeMenu by remember { mutableStateOf(false) }
+    var isPageEditMode by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
     var widgetToManage by remember { mutableStateOf<Int?>(null) }
     val gridState = rememberLazyGridState()
@@ -186,7 +195,7 @@ fun HomeWorkspaceScreen(
 
     var draggingDockPkg by remember { mutableStateOf<String?>(null) }
     var dockDragX by remember { mutableFloatStateOf(0f) }
-    var dockTotalDist by remember { mutableFloatStateOf(0f) }
+    var lastDockPointerX by remember { mutableFloatStateOf(0f) }
     var dockSwapCount by remember { mutableIntStateOf(0) }
     val localDock = remember { mutableStateListOf<AppEntry>() }
     LaunchedEffect(dockApps, draggingDockPkg) {
@@ -197,24 +206,32 @@ fun HomeWorkspaceScreen(
     }
 
     val isAnyDragActive = draggingPkg != null || draggingDockPkg != null || externalDragActive
+    val isZoomedOut = isAnyDragActive || isPageEditMode
     val workspaceScale by animateFloatAsState(
-        targetValue = if (isAnyDragActive) 0.88f else 1f,
+        targetValue = when {
+            isPageEditMode -> 0.80f
+            isAnyDragActive -> 0.88f
+            else -> 1f
+        },
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "wsScale"
     )
     val workspaceOffsetYPx by animateFloatAsState(
-        targetValue = if (isAnyDragActive) with(density) { 46.dp.toPx() } else 0f,
+        targetValue = if (isZoomedOut) with(density) { 46.dp.toPx() } else 0f,
         animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow),
         label = "wsOffsetY"
     )
 
-    val hasWidgetsPage = settings.widgetIds.isNotEmpty() || settings.extraPagesCount > 0
-    val totalPages = 1 + maxOf(settings.extraPagesCount, if (settings.widgetIds.isNotEmpty()) 1 else 0)
+    val basePages = 1 + maxOf(settings.extraPagesCount, if (settings.widgetIds.isNotEmpty()) 1 else 0)
+    val totalPages = if (isZoomedOut) basePages + 1 else basePages
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { totalPages })
 
     LaunchedEffect(homeResetSignal) {
-        if (homeResetSignal > 0 && pagerState.currentPage != 0) {
-            pagerState.animateScrollToPage(0)
+        if (homeResetSignal > 0) {
+            isPageEditMode = false
+            if (pagerState.currentPage != 0) {
+                pagerState.animateScrollToPage(0)
+            }
         }
     }
 
@@ -274,7 +291,19 @@ fun HomeWorkspaceScreen(
                 end = 16.dp
             )
             .onGloballyPositioned { coords ->
-                homeOverlayOrigin = coords.positionInRoot()
+                homeOverlayCoords = coords
+            }
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    latestPointerInOverlay = down.position
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val ch = event.changes.firstOrNull { it.id == down.id } ?: break
+                        latestPointerInOverlay = ch.position
+                        if (!ch.pressed) break
+                    }
+                }
             }
     ) {
         Column(
@@ -292,7 +321,67 @@ fun HomeWorkspaceScreen(
                 beyondViewportPageCount = 1,
                 modifier = Modifier.weight(1f)
             ) { page ->
-                if (page == 0) {
+                val pageDottedModifier = if (isZoomedOut && page < basePages) {
+                    val borderColor = palette.border
+                    val radiusPx = with(density) { settings.cornerRadiusDp.dp.toPx() }
+                    Modifier
+                        .drawBehind {
+                            drawRoundRect(
+                                color = borderColor,
+                                style = Stroke(
+                                    width = 2.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                ),
+                                cornerRadius = CornerRadius(radiusPx, radiusPx)
+                            )
+                        }
+                        .padding(8.dp)
+                } else {
+                    Modifier
+                }
+
+                Box(modifier = Modifier.fillMaxSize().then(pageDottedModifier)) {
+                    if (page == basePages && isZoomedOut) {
+                        // Trailing "+ ADD NEW PAGE" card in zoom-out mode
+                        val borderColor = palette.accent
+                        val radiusPx = with(density) { settings.cornerRadiusDp.dp.toPx() }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .drawBehind {
+                                    drawRoundRect(
+                                        color = borderColor,
+                                        style = Stroke(
+                                            width = 2.dp.toPx(),
+                                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(14f, 10f), 0f)
+                                        ),
+                                        cornerRadius = CornerRadius(radiusPx, radiusPx)
+                                    )
+                                }
+                                .clickable {
+                                    onAddPage()
+                                    scope.launch { pagerState.animateScrollToPage(basePages) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Add,
+                                    contentDescription = "Add New Page",
+                                    tint = palette.accent,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    text = "ADD NEW PAGE",
+                                    color = palette.accent,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = (13 * scale).sp
+                                )
+                            }
+                        }
+                    } else if (page == 0) {
                     // Default Home Screen
                     Column(
                         modifier = Modifier.fillMaxSize()
@@ -419,34 +508,34 @@ fun HomeWorkspaceScreen(
                                         )
                                     } else {
                                         val isDragging = draggingPkg == app.packageName
-                                        var itemCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
                                         Box(
                                             modifier = Modifier
                                                 .then(if (!isDragging) Modifier.animateItem() else Modifier)
-                                                .onGloballyPositioned { coords -> itemCoords = coords }
                                                 .graphicsLayer { alpha = if (isDragging) 0f else 1f }
                                                 .karuiAppHoldOrDrag(
                                                     key = app.packageName,
-                                                    getCoords = { itemCoords },
                                                     haptic = if (settings.hapticFeedback) haptic else null,
+                                                    onTap = { onLaunchApp(app) },
                                                     onShowMenu = { onLongPressApp(app) },
                                                     onDismissMenu = onDismissLongPressApp,
-                                                    onDragStart = { rootPos ->
+                                                    onDragStart = {
                                                         draggingPkg = app.packageName
                                                         activeDragApp = app
                                                         swapCount = 0
                                                         lastSwapTime = 0L
                                                         activeDragIsSystem = app.isSystem
-                                                        activeDragRootPos = rootPos
+                                                        activeDragOverlayPos = latestPointerInOverlay
                                                     },
-                                                    onDrag = { rootPos, _ ->
-                                                        activeDragRootPos = rootPos
+                                                    onDrag = {
+                                                        activeDragOverlayPos = latestPointerInOverlay
                                                         val gCoords = gridCoords ?: return@karuiAppHoldOrDrag
+                                                        val hCoords = homeOverlayCoords ?: return@karuiAppHoldOrDrag
                                                         val currentIdx = localSlots.indexOfFirst { it?.packageName == draggingPkg }
                                                         if (currentIdx < 0) return@karuiAppHoldOrDrag
                                                         val now = System.currentTimeMillis()
                                                         if (now - lastSwapTime < 110L) return@karuiAppHoldOrDrag
 
+                                                        val rootPos = hCoords.localToRoot(latestPointerInOverlay)
                                                         val localInGrid = gCoords.windowToLocal(rootPos)
                                                         val visible = gridState.layoutInfo.visibleItemsInfo
                                                         val closest = visible
@@ -471,8 +560,9 @@ fun HomeWorkspaceScreen(
                                                         }
                                                     },
                                                     onDragEnd = {
-                                                        val droppedY = activeDragRootPos.y
-                                                        val droppedX = activeDragRootPos.x
+                                                        val rootPos = homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos
+                                                        val droppedY = rootPos.y
+                                                        val droppedX = rootPos.x
                                                         when {
                                                             droppedY < topDropLimitPx -> {
                                                                 if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
@@ -506,7 +596,7 @@ fun HomeWorkspaceScreen(
                                                 hapticsEnabled = settings.hapticFeedback,
                                                 iconShape = settings.iconShape,
                                                 iconSize = settings.iconSizeDp.dp,
-                                                onClick = { onLaunchApp(app) },
+                                                onClick = null,
                                                 onLongClick = null
                                             )
                                         }
@@ -613,6 +703,7 @@ fun HomeWorkspaceScreen(
                         )
                     }
                 }
+                }
             }
 
             if (settings.showSearchBar) {
@@ -696,23 +787,23 @@ fun HomeWorkspaceScreen(
                                 }
                                 .karuiAppHoldOrDrag(
                                     key = app.packageName,
-                                    getCoords = { dockItemCoords },
                                     haptic = if (settings.hapticFeedback) haptic else null,
+                                    onTap = { onLaunchApp(app) },
                                     onShowMenu = { onLongPressApp(app) },
                                     onDismissMenu = onDismissLongPressApp,
-                                    onDragStart = { rootPos ->
+                                    onDragStart = {
                                         draggingDockPkg = app.packageName
                                         activeDragApp = app
                                         dockDragX = 0f
-                                        dockTotalDist = 0f
+                                        lastDockPointerX = latestPointerInOverlay.x
                                         dockSwapCount = 0
                                         activeDragIsSystem = app.isSystem
-                                        activeDragRootPos = rootPos
+                                        activeDragOverlayPos = latestPointerInOverlay
                                     },
-                                    onDrag = { rootPos, deltaRoot ->
-                                        dockDragX += deltaRoot.x
-                                        dockTotalDist += deltaRoot.getDistance()
-                                        activeDragRootPos = rootPos
+                                    onDrag = {
+                                        activeDragOverlayPos = latestPointerInOverlay
+                                        dockDragX += (latestPointerInOverlay.x - lastDockPointerX)
+                                        lastDockPointerX = latestPointerInOverlay.x
                                         val curIdx = localDock.indexOfFirst { it.packageName == draggingDockPkg }
                                         val cellW = (dockItemCoords?.size?.width?.toFloat() ?: 120f).coerceAtLeast(1f)
                                         if (curIdx >= 0) {
@@ -730,8 +821,9 @@ fun HomeWorkspaceScreen(
                                         }
                                     },
                                     onDragEnd = {
-                                        val droppedY = activeDragRootPos.y
-                                        val droppedX = activeDragRootPos.x
+                                        val rootPos = homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos
+                                        val droppedY = rootPos.y
+                                        val droppedX = rootPos.x
                                         when {
                                             droppedY < topDropLimitPx -> {
                                                 if (!app.isSystem && droppedX >= screenWidthPx / 2f) {
@@ -747,14 +839,12 @@ fun HomeWorkspaceScreen(
                                         draggingDockPkg = null
                                         activeDragApp = null
                                         dockDragX = 0f
-                                        dockTotalDist = 0f
                                         dockSwapCount = 0
                                     },
                                     onDragCancel = {
                                         draggingDockPkg = null
                                         activeDragApp = null
                                         dockDragX = 0f
-                                        dockTotalDist = 0f
                                         dockSwapCount = 0
                                     }
                                 )
@@ -766,7 +856,7 @@ fun HomeWorkspaceScreen(
                                 hapticsEnabled = settings.hapticFeedback,
                                 iconShape = settings.iconShape,
                                 iconSize = settings.iconSizeDp.dp,
-                                onClick = { onLaunchApp(app) },
+                                onClick = null,
                                 onLongClick = null
                             )
                         }
@@ -782,7 +872,7 @@ fun HomeWorkspaceScreen(
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.TopCenter)
         ) {
-            val dropPos = if (externalDragActive) externalDragPos else activeDragRootPos
+            val dropPos = if (externalDragActive) externalDragPos else (homeOverlayCoords?.localToRoot(activeDragOverlayPos) ?: activeDragOverlayPos)
             val dropIsSys = if (externalDragActive) externalDragIsSystem else activeDragIsSystem
             val inTopZone = dropPos.y < topDropLimitPx
             val hoverRemove = inTopZone && (dropIsSys || dropPos.x < screenWidthPx / 2f)
@@ -850,11 +940,57 @@ fun HomeWorkspaceScreen(
             }
         }
 
+        // Page Edit Mode Top Bar
+        AnimatedVisibility(
+            visible = isPageEditMode && !isAnyDragActive,
+            enter = fadeIn(),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "PAGES ($basePages)",
+                    color = palette.accent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 12.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                if (pagerState.currentPage in 1 until basePages) {
+                    KaruiSubtleButton(
+                        text = "DELETE PAGE",
+                        onClick = {
+                            if (pagerState.currentPage == 1) {
+                                settings.widgetIds.forEach { onRemoveWidget(it) }
+                            }
+                            scope.launch { pagerState.animateScrollToPage((pagerState.currentPage - 1).coerceAtLeast(0)) }
+                            onRemovePage()
+                        }
+                    )
+                }
+                KaruiButton(
+                    text = "DONE",
+                    onClick = {
+                        isPageEditMode = false
+                        if (pagerState.currentPage >= basePages) {
+                            scope.launch { pagerState.animateScrollToPage((basePages - 1).coerceAtLeast(0)) }
+                        }
+                    }
+                )
+            }
+        }
+
         // Unclipped Floating Drag Overlay for Home & Dock icons
         activeDragApp?.let { dragged ->
             val halfIconPx = with(density) { (settings.iconSizeDp.dp.toPx() / 2f) }
-            val ox = with(density) { (activeDragRootPos.x - homeOverlayOrigin.x - halfIconPx).toDp() }
-            val oy = with(density) { (activeDragRootPos.y - homeOverlayOrigin.y - halfIconPx).toDp() }
+            val ox = with(density) { (activeDragOverlayPos.x - halfIconPx).toDp() }
+            val oy = with(density) { (activeDragOverlayPos.y - halfIconPx).toDp() }
             Box(
                 modifier = Modifier
                     .offset(x = ox, y = oy)
@@ -900,7 +1036,7 @@ fun HomeWorkspaceScreen(
                 Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("Add Widget", { showHomeMenu = false; onAddWidget() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton("Add Home Page", { showHomeMenu = false; onAddPage() }, Modifier.fillMaxWidth())
+                KaruiSubtleButton("Edit Pages (Zoom Out)", { showHomeMenu = false; isPageEditMode = true }, Modifier.fillMaxWidth())
                 if (pagerState.currentPage > 0) {
                     Spacer(modifier = Modifier.height(8.dp))
                     KaruiSubtleButton("Delete This Page", {
@@ -913,11 +1049,7 @@ fun HomeWorkspaceScreen(
                     }, Modifier.fillMaxWidth())
                 }
                 Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton("Open App Drawer", { showHomeMenu = false; onOpenDrawer(false) }, Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(8.dp))
                 KaruiSubtleButton("System Wallpaper", { showHomeMenu = false; onOpenWallpaper() }, Modifier.fillMaxWidth())
-                Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton("Lock Screen", { showHomeMenu = false; onLockScreen() }, Modifier.fillMaxWidth())
             }
         }
     }

@@ -166,7 +166,7 @@ class LauncherPreferences(private val context: Context) {
             weatherLastUpdated = p[Keys.WEATHER_UPDATED] ?: 0L,
             showSteps = p[Keys.SHOW_STEPS] ?: false,
             showScreenTime = p[Keys.SHOW_SCREEN_TIME] ?: false,
-            extraPagesCount = (p[Keys.EXTRA_PAGES] ?: 0).coerceIn(0, 4),
+            extraPagesCount = (p[Keys.EXTRA_PAGES] ?: 0).coerceIn(0, 20),
             pinnedHomeSlots = parseSlotCsv(p[Keys.PINNED_HOME]),
             pinnedHomePackages = parseSlotCsv(p[Keys.PINNED_HOME]).filterNotNull(),
             dockPackages = parseCsv(p[Keys.DOCK_PKGS]),
@@ -253,7 +253,7 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setWeatherRefreshMinutes(mins: Int) = context.dataStore.edit { it[Keys.WEATHER_REFRESH_MIN] = mins }
     suspend fun setShowSteps(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_STEPS] = v }
     suspend fun setShowScreenTime(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_SCREEN_TIME] = v }
-    suspend fun setExtraPagesCount(count: Int) = context.dataStore.edit { it[Keys.EXTRA_PAGES] = count.coerceIn(0, 4) }
+    suspend fun setExtraPagesCount(count: Int) = context.dataStore.edit { it[Keys.EXTRA_PAGES] = count.coerceIn(0, 20) }
 
     suspend fun saveWeatherCache(temp: String, desc: String, ts: Long) {
         context.dataStore.edit {

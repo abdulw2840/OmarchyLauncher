@@ -24,6 +24,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,6 +54,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Text
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -195,6 +199,7 @@ class MainActivity : ComponentActivity() {
             var showWidgetPicker by remember { mutableStateOf(false) }
             var draggingDrawerApp by remember { mutableStateOf<AppEntry?>(null) }
             var draggingDrawerPos by remember { mutableStateOf(Offset.Zero) }
+            var latestRootPointer by remember { mutableStateOf(Offset.Zero) }
             var dockTopY by remember { mutableStateOf(Float.MAX_VALUE) }
 
             LaunchedEffect(homeResetSignal) {
@@ -225,6 +230,18 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier
                         .fillMaxSize()
                         .background(bgColor)
+                        .pointerInput(Unit) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                                latestRootPointer = down.position
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val ch = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    latestRootPointer = ch.position
+                                    if (!ch.pressed) break
+                                }
+                            }
+                        }
                 ) {
                     HomeWorkspaceScreen(
                         settings = settings,
@@ -308,12 +325,12 @@ class MainActivity : ComponentActivity() {
                             },
                             onUnhideApp = viewModel::toggleHiddenPackage,
                             onUnfreezeApp = { pkg -> viewModel.freezeApp(pkg, false) },
-                            onDragToHomeStart = { app, pos ->
+                            onDragToHomeStart = { app ->
                                 draggingDrawerApp = app
-                                draggingDrawerPos = pos
+                                draggingDrawerPos = latestRootPointer
                             },
-                            onDragToHomeMove = { delta ->
-                                draggingDrawerPos += delta
+                            onDragToHomeMove = {
+                                draggingDrawerPos = latestRootPointer
                             },
                             onDragToHomeEnd = { commit ->
                                 val dropped = draggingDrawerApp

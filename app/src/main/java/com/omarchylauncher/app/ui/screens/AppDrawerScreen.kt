@@ -118,8 +118,8 @@ fun AppDrawerScreen(
     onLaunchHiddenApp: (String) -> Unit,
     onUnhideApp: (String) -> Unit,
     onUnfreezeApp: (String) -> Unit,
-    onDragToHomeStart: (AppEntry, Offset) -> Unit,
-    onDragToHomeMove: (Offset) -> Unit,
+    onDragToHomeStart: (AppEntry) -> Unit,
+    onDragToHomeMove: () -> Unit,
     onDragToHomeEnd: (Boolean) -> Unit
 ) {
     val palette = LocalKaruiPalette.current
@@ -537,31 +537,18 @@ fun AppDrawerScreen(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         items(pageApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
-                            var itemCoords by remember { mutableStateOf<LayoutCoordinates?>(null) }
-
                             Box(
                                 modifier = Modifier
-                                    .onGloballyPositioned { coords ->
-                                        itemCoords = coords
-                                    }
                                     .karuiAppHoldOrDrag(
                                         key = app.packageName,
-                                        getCoords = { itemCoords },
                                         haptic = if (settings.hapticFeedback) haptic else null,
+                                        onTap = { onLaunchApp(app) },
                                         onShowMenu = { onLongPressApp(app) },
                                         onDismissMenu = onDismissLongPressApp,
-                                        onDragStart = { rootPos ->
-                                            onDragToHomeStart(app, rootPos)
-                                        },
-                                        onDrag = { _, deltaRoot ->
-                                            onDragToHomeMove(deltaRoot)
-                                        },
-                                        onDragEnd = {
-                                            onDragToHomeEnd(true)
-                                        },
-                                        onDragCancel = {
-                                            onDragToHomeEnd(false)
-                                        }
+                                        onDragStart = { onDragToHomeStart(app) },
+                                        onDrag = { onDragToHomeMove() },
+                                        onDragEnd = { onDragToHomeEnd(true) },
+                                        onDragCancel = { onDragToHomeEnd(false) }
                                     )
                             ) {
                                 KaruiAppTile(
@@ -571,7 +558,7 @@ fun AppDrawerScreen(
                                     hapticsEnabled = settings.hapticFeedback,
                                     iconShape = settings.iconShape,
                                     iconSize = settings.iconSizeDp.dp,
-                                    onClick = { onLaunchApp(app) },
+                                    onClick = null,
                                     onLongClick = null
                                 )
                             }

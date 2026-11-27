@@ -68,12 +68,12 @@ fun iconShapeToComposeShape(iconShape: IconShape): Shape = when (iconShape) {
 
 fun Modifier.karuiAppHoldOrDrag(
     key: Any?,
-    getCoords: () -> LayoutCoordinates?,
     haptic: HapticFeedback?,
+    onTap: () -> Unit,
     onShowMenu: () -> Unit,
     onDismissMenu: () -> Unit,
-    onDragStart: (rootPos: Offset) -> Unit,
-    onDrag: (rootPos: Offset, deltaRoot: Offset) -> Unit,
+    onDragStart: () -> Unit,
+    onDrag: () -> Unit,
     onDragEnd: () -> Unit,
     onDragCancel: () -> Unit
 ): Modifier = this.pointerInput(key) {
@@ -83,6 +83,7 @@ fun Modifier.karuiAppHoldOrDrag(
         val downPos = down.position
         var movedBeforeLongPress = false
         var releasedBeforeLongPress = false
+        var wasConsumed = false
 
         val timedOut = withTimeoutOrNull(360L) {
             while (true) {
@@ -90,6 +91,11 @@ fun Modifier.karuiAppHoldOrDrag(
                 val ch = event.changes.firstOrNull { it.id == down.id }
                 if (ch == null || !ch.pressed) {
                     releasedBeforeLongPress = true
+                    if (ch?.isConsumed == true) wasConsumed = true
+                    break
+                }
+                if (ch.isConsumed) {
+                    wasConsumed = true
                     break
                 }
                 if ((ch.position - downPos).getDistance() > touchSlop) {
@@ -99,7 +105,13 @@ fun Modifier.karuiAppHoldOrDrag(
             }
         }
 
-        if (releasedBeforeLongPress || movedBeforeLongPress || timedOut != null) {
+        if (releasedBeforeLongPress) {
+            if (!movedBeforeLongPress && !wasConsumed) {
+                onTap()
+            }
+            return@awaitEachGesture
+        }
+        if (movedBeforeLongPress || wasConsumed || timedOut != null) {
             return@awaitEachGesture
         }
 
@@ -108,32 +120,26 @@ fun Modifier.karuiAppHoldOrDrag(
         onShowMenu()
 
         var dragStarted = false
-        var prevRoot = getCoords()?.localToRoot(downPos) ?: downPos
-        var anchorLocal = downPos
 
         try {
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
                 val ch = event.changes.firstOrNull { it.id == down.id }
                 if (ch == null || !ch.pressed) {
+                    ch?.consume()
                     if (dragStarted) onDragEnd()
                     break
                 }
-                val currentCoords = getCoords()
-                val currentRoot = currentCoords?.localToRoot(ch.position) ?: prevRoot
                 if (!dragStarted) {
-                    if ((ch.position - anchorLocal).getDistance() > 18f) {
+                    if ((ch.position - downPos).getDistance() > 18f) {
                         dragStarted = true
                         onDismissMenu()
-                        prevRoot = currentRoot
-                        onDragStart(currentRoot)
+                        onDragStart()
                         ch.consume()
                     }
                 } else {
                     ch.consume()
-                    val deltaRoot = currentRoot - prevRoot
-                    prevRoot = currentRoot
-                    onDrag(currentRoot, deltaRoot)
+                    onDrag()
                 }
             }
         } catch (_: Throwable) {
@@ -150,7 +156,7 @@ fun KaruiAppTile(
     hapticsEnabled: Boolean,
     iconShape: IconShape = IconShape.SQUARE,
     iconSize: Dp = 44.dp,
-    onClick: () -> Unit,
+    onClick: (() -> Unit)? = null,
     onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -167,16 +173,16 @@ fun KaruiAppTile(
         else -> null
     }
 
-    val clickModifier = if (onLongClick != null) {
-        Modifier.combinedClickable(
+    val clickModifier = when {
+        onLongClick != null && onClick != null -> Modifier.combinedClickable(
             onClick = onClick,
             onLongClick = {
                 if (hapticsEnabled) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                 onLongClick()
             }
         )
-    } else {
-        Modifier.clickable(onClick = onClick)
+        onClick != null -> Modifier.clickable(onClick = onClick)
+        else -> Modifier
     }
 
     Column(
