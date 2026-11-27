@@ -66,9 +66,18 @@ fun iconShapeToComposeShape(iconShape: IconShape): Shape = when (iconShape) {
     IconShape.ONEUI -> RoundedCornerShape(percent = 36)
 }
 
+enum class IconGestureState {
+    IDLE,
+    PRESSED,
+    LONG_PRESSED,
+    DRAGGING,
+    MENU_OPEN
+}
+
 fun Modifier.karuiAppHoldOrDrag(
     key: Any?,
     haptic: HapticFeedback?,
+    onInteractionActiveChange: (Boolean) -> Unit = {},
     onTap: () -> Unit,
     onShowMenu: () -> Unit,
     onDismissMenu: () -> Unit,
@@ -78,61 +87,75 @@ fun Modifier.karuiAppHoldOrDrag(
     onDragCancel: () -> Unit
 ): Modifier = this.pointerInput(key) {
     val touchSlop = viewConfiguration.touchSlop
+    val longPressTimeout = viewConfiguration.longPressTimeoutMillis
     awaitEachGesture {
+        var gestureState = IconGestureState.IDLE
         val down = awaitFirstDown(requireUnconsumed = false)
+        val downId = down.id
         val downPos = down.position
+        gestureState = IconGestureState.PRESSED
+        onInteractionActiveChange(true)
+
         var movedBeforeLongPress = false
         var releasedBeforeLongPress = false
         var wasConsumed = false
 
-        val timedOut = withTimeoutOrNull(360L) {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Main)
-                val ch = event.changes.firstOrNull { it.id == down.id }
-                if (ch == null || !ch.pressed) {
-                    releasedBeforeLongPress = true
-                    if (ch?.isConsumed == true) wasConsumed = true
-                    break
-                }
-                if (ch.isConsumed) {
-                    wasConsumed = true
-                    break
-                }
-                if ((ch.position - downPos).getDistance() > touchSlop) {
-                    movedBeforeLongPress = true
-                    break
-                }
-            }
-        }
-
-        if (releasedBeforeLongPress) {
-            if (!movedBeforeLongPress && !wasConsumed) {
-                onTap()
-            }
-            return@awaitEachGesture
-        }
-        if (movedBeforeLongPress || wasConsumed || timedOut != null) {
-            return@awaitEachGesture
-        }
-
-        // Long press triggered while finger is still down!
-        haptic?.performHapticFeedback(HapticFeedbackType.LongPress)
-        onShowMenu()
-
-        var dragStarted = false
-
         try {
+            val timedOut = withTimeoutOrNull(longPressTimeout) {
+                while (true) {
+                    val event = awaitPointerEvent(PointerEventPass.Main)
+                    val ch = event.changes.firstOrNull { it.id == downId }
+                    if (ch == null || !ch.pressed) {
+                        releasedBeforeLongPress = true
+                        if (ch?.isConsumed == true) wasConsumed = true
+                        break
+                    }
+                    if (ch.isConsumed) {
+                        wasConsumed = true
+                        break
+                    }
+                    if ((ch.position - downPos).getDistance() > touchSlop) {
+                        movedBeforeLongPress = true
+                        break
+                    }
+                }
+            }
+
+            if (releasedBeforeLongPress) {
+                gestureState = IconGestureState.IDLE
+                onInteractionActiveChange(false)
+                if (!movedBeforeLongPress && !wasConsumed) {
+                    onTap()
+                }
+                return@awaitEachGesture
+            }
+            if (movedBeforeLongPress || wasConsumed || timedOut != null) {
+                gestureState = IconGestureState.IDLE
+                onInteractionActiveChange(false)
+                return@awaitEachGesture
+            }
+
+            // PRESSED -> LONG_PRESSED -> MENU_OPEN
+            gestureState = IconGestureState.LONG_PRESSED
+            haptic?.performHapticFeedback(HapticFeedbackType.LongPress)
+            gestureState = IconGestureState.MENU_OPEN
+            onShowMenu()
+
             while (true) {
                 val event = awaitPointerEvent(PointerEventPass.Main)
-                val ch = event.changes.firstOrNull { it.id == down.id }
+                val ch = event.changes.firstOrNull { it.id == downId }
                 if (ch == null || !ch.pressed) {
                     ch?.consume()
-                    if (dragStarted) onDragEnd()
+                    if (gestureState == IconGestureState.DRAGGING) {
+                        onDragEnd()
+                    }
+                    gestureState = IconGestureState.IDLE
+                    onInteractionActiveChange(false)
                     break
                 }
-                if (!dragStarted) {
-                    if ((ch.position - downPos).getDistance() > 18f) {
-                        dragStarted = true
+                if (gestureState != IconGestureState.DRAGGING) {
+                    if ((ch.position - downPos).getDistance() > touchSlop) {
+                        gestureState = IconGestureState.DRAGGING
                         onDismissMenu()
                         onDragStart()
                         ch.consume()
@@ -143,7 +166,11 @@ fun Modifier.karuiAppHoldOrDrag(
                 }
             }
         } catch (_: Throwable) {
-            if (dragStarted) onDragCancel()
+            if (gestureState == IconGestureState.DRAGGING) {
+                onDragCancel()
+            }
+            gestureState = IconGestureState.IDLE
+            onInteractionActiveChange(false)
         }
     }
 }

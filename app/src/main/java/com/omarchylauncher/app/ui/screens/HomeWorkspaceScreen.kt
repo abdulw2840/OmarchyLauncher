@@ -173,6 +173,7 @@ fun HomeWorkspaceScreen(
     var activeDragApp by remember { mutableStateOf<AppEntry?>(null) }
 
     var showHomeMenu by remember { mutableStateOf(false) }
+    var activeIconInteraction by remember { mutableStateOf(false) }
     var isPageEditMode by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
     var widgetToManage by remember { mutableStateOf<Int?>(null) }
@@ -250,7 +251,9 @@ fun HomeWorkspaceScreen(
                         if (settings.doubleTapToSleep) onLockScreen()
                     },
                     onLongPress = {
-                        showHomeMenu = true
+                        if (!activeIconInteraction && !isAnyDragActive) {
+                            showHomeMenu = true
+                        }
                     }
                 )
             }
@@ -510,12 +513,17 @@ fun HomeWorkspaceScreen(
                                         val isDragging = draggingPkg == app.packageName
                                         Box(
                                             modifier = Modifier
-                                                .then(if (!isDragging) Modifier.animateItem() else Modifier)
+                                                .animateItem()
                                                 .graphicsLayer { alpha = if (isDragging) 0f else 1f }
-                                                .karuiAppHoldOrDrag(
-                                                    key = app.packageName,
-                                                    haptic = if (settings.hapticFeedback) haptic else null,
-                                                    onTap = { onLaunchApp(app) },
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .karuiAppHoldOrDrag(
+                                                        key = app.packageName,
+                                                        haptic = if (settings.hapticFeedback) haptic else null,
+                                                        onInteractionActiveChange = { activeIconInteraction = it },
+                                                        onTap = { onLaunchApp(app) },
                                                     onShowMenu = { onLongPressApp(app) },
                                                     onDismissMenu = onDismissLongPressApp,
                                                     onDragStart = {
@@ -588,17 +596,18 @@ fun HomeWorkspaceScreen(
                                                         swapCount = 0
                                                     }
                                                 )
-                                        ) {
-                                            KaruiAppTile(
-                                                app = app,
-                                                showLabel = settings.showHomeLabels,
-                                                monochrome = settings.monochromeIcons,
-                                                hapticsEnabled = settings.hapticFeedback,
-                                                iconShape = settings.iconShape,
-                                                iconSize = settings.iconSizeDp.dp,
-                                                onClick = null,
-                                                onLongClick = null
-                                            )
+                                            ) {
+                                                KaruiAppTile(
+                                                    app = app,
+                                                    showLabel = settings.showHomeLabels,
+                                                    monochrome = settings.monochromeIcons,
+                                                    hapticsEnabled = settings.hapticFeedback,
+                                                    iconShape = settings.iconShape,
+                                                    iconSize = settings.iconSizeDp.dp,
+                                                    onClick = null,
+                                                    onLongClick = null
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -687,6 +696,7 @@ fun HomeWorkspaceScreen(
                     }
                 }
             }
+            }
 
             if (totalPages > 1) {
                 Row(
@@ -702,7 +712,6 @@ fun HomeWorkspaceScreen(
                                 .background(if (i == pagerState.currentPage) palette.accent else palette.gray)
                         )
                     }
-                }
                 }
             }
 
@@ -789,6 +798,7 @@ fun HomeWorkspaceScreen(
                                 .karuiAppHoldOrDrag(
                                     key = app.packageName,
                                     haptic = if (settings.hapticFeedback) haptic else null,
+                                    onInteractionActiveChange = { activeIconInteraction = it },
                                     onTap = { onLaunchApp(app) },
                                     onShowMenu = { onLongPressApp(app) },
                                     onDismissMenu = onDismissLongPressApp,
@@ -989,12 +999,14 @@ fun HomeWorkspaceScreen(
 
         // Unclipped Floating Drag Overlay for Home & Dock icons
         activeDragApp?.let { dragged ->
-            val halfIconPx = with(density) { (settings.iconSizeDp.dp.toPx() / 2f) }
-            val ox = with(density) { (activeDragOverlayPos.x - halfIconPx).toDp() }
-            val oy = with(density) { (activeDragOverlayPos.y - halfIconPx).toDp() }
+            val tileW = (settings.iconSizeDp * scale + 12).dp
+            val halfTilePx = with(density) { tileW.toPx() / 2f }
+            val ox = with(density) { (activeDragOverlayPos.x - halfTilePx).toDp() }
+            val oy = with(density) { (activeDragOverlayPos.y - halfTilePx).toDp() }
             Box(
                 modifier = Modifier
                     .offset(x = ox, y = oy)
+                    .width(tileW)
                     .zIndex(50f)
                     .graphicsLayer { scaleX = 1.12f; scaleY = 1.12f }
             ) {

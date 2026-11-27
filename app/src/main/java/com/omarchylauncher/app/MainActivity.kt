@@ -43,6 +43,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -360,12 +361,14 @@ class MainActivity : ComponentActivity() {
                     }
 
                     draggingDrawerApp?.let { dragged ->
-                        val halfIconPx = with(density) { (settings.iconSizeDp.dp.toPx() / 2f) }
-                        val offsetX = with(density) { (draggingDrawerPos.x - halfIconPx).toDp() }
-                        val offsetY = with(density) { (draggingDrawerPos.y - halfIconPx).toDp() }
+                        val tileW = (settings.iconSizeDp * settings.uiScale + 12).dp
+                        val halfTilePx = with(density) { tileW.toPx() / 2f }
+                        val offsetX = with(density) { (draggingDrawerPos.x - halfTilePx).toDp() }
+                        val offsetY = with(density) { (draggingDrawerPos.y - halfTilePx).toDp() }
                         Box(
                             modifier = Modifier
                                 .offset(x = offsetX, y = offsetY)
+                                .width(tileW)
                                 .graphicsLayer { scaleX = 1.12f; scaleY = 1.12f }
                         ) {
                             KaruiAppTile(
