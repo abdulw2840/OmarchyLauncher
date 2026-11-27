@@ -178,6 +178,7 @@ fun HomeWorkspaceScreen(
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
     val context = LocalContext.current
+    var workspaceGestureCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -321,6 +322,7 @@ fun HomeWorkspaceScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onGloballyPositioned { workspaceGestureCoordinates = it }
             .pointerInput(settings.doubleTapToSleep) {
                 detectTapGestures(
                     onDoubleTap = {
@@ -341,7 +343,7 @@ fun HomeWorkspaceScreen(
                     var totalDx = 0f
                     var totalDy = 0f
                     var lastDy = 0f
-                    var lastPos = down.position
+                    var lastPos = workspaceGestureCoordinates?.localToRoot(down.position) ?: down.position
                     var triggered = false
                     var pullingDrawer = false
                     var lastFrac = 0f
@@ -358,8 +360,9 @@ fun HomeWorkspaceScreen(
                                 break
                             }
 
-                            val delta = change.position - lastPos
-                            lastPos = change.position
+                            val rootPosition = workspaceGestureCoordinates?.localToRoot(change.position) ?: change.position
+                            val delta = rootPosition - lastPos
+                            lastPos = rootPosition
                             lastDy = delta.y
                             totalDx += delta.x
                             totalDy += delta.y
