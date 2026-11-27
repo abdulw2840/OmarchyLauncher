@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.LauncherApps
+import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
 import android.net.Uri
 import android.os.Process
@@ -31,6 +32,12 @@ data class AppEntry(
 ) {
     val componentName: ComponentName get() = ComponentName(packageName, activityName)
 }
+
+data class HiddenAppInfo(
+    val packageName: String,
+    val label: String,
+    val icon: ImageBitmap?
+)
 
 class AppRepository(private val context: Context) {
 
@@ -133,5 +140,20 @@ class AppRepository(private val context: Context) {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
+    }
+
+    fun resolveHiddenApps(packages: Set<String>): List<HiddenAppInfo> {
+        val pm = context.packageManager
+        val flags = PackageManager.MATCH_DISABLED_COMPONENTS or PackageManager.MATCH_UNINSTALLED_PACKAGES
+        return packages.map { pkg ->
+            val info = runCatching { pm.getApplicationInfo(pkg, flags) }.getOrNull()
+            val label = if (info != null) {
+                runCatching { pm.getApplicationLabel(info).toString() }.getOrDefault(pkg)
+            } else pkg
+            val icon = if (info != null) {
+                runCatching { pm.getApplicationIcon(info).toBitmap(72, 72).asImageBitmap() }.getOrNull()
+            } else null
+            HiddenAppInfo(packageName = pkg, label = label, icon = icon)
+        }.sortedBy { it.label.lowercase() }
     }
 }

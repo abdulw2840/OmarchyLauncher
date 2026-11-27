@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,7 +23,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicTextField
@@ -58,6 +62,8 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -70,6 +76,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.omarchylauncher.app.data.AppEntry
+import com.omarchylauncher.app.data.HiddenAppInfo
 import com.omarchylauncher.app.data.LauncherSettings
 import com.omarchylauncher.app.data.WebSearchProvider
 import com.omarchylauncher.app.ui.components.KaruiAppTile
@@ -82,6 +89,7 @@ import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
 import kotlinx.coroutines.launch
 import java.util.Locale
+import kotlin.math.abs
 
 @Composable
 fun AppDrawerScreen(
@@ -98,6 +106,7 @@ fun AppDrawerScreen(
     onLockScreen: () -> Unit,
     onRefreshApps: () -> Unit,
     onSearchWeb: (String, WebSearchProvider) -> Unit,
+    onResolveHiddenApps: suspend (Set<String>) -> List<HiddenAppInfo>,
     onLaunchHiddenApp: (String) -> Unit,
     onUnhideApp: (String) -> Unit
 ) {
@@ -113,6 +122,16 @@ fun AppDrawerScreen(
 
     var showPinDialog by remember { mutableStateOf(false) }
     var showHiddenVault by remember { mutableStateOf(false) }
+    var resolvedHiddenApps by remember { mutableStateOf<List<HiddenAppInfo>>(emptyList()) }
+
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+
+    LaunchedEffect(showHiddenVault, settings.hiddenPackages) {
+        if (showHiddenVault) {
+            resolvedHiddenApps = onResolveHiddenApps(settings.hiddenPackages)
+        }
+    }
 
     LaunchedEffect(focusSearchOnOpen) {
         if (focusSearchOnOpen) {
@@ -132,6 +151,32 @@ fun AppDrawerScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(palette.bg)
+            .pointerInput(settings.drawerListMode) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                    var totalDx = 0f
+                    var totalDy = 0f
+                    var lastPos = down.position
+                    var triggered = false
+
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!change.pressed) break
+
+                        val delta = change.position - lastPos
+                        lastPos = change.position
+                        totalDx += delta.x
+                        totalDy += delta.y
+
+                        val atTop = if (settings.drawerListMode) !listState.canScrollBackward else !gridState.canScrollBackward
+                        if (!triggered && atTop && totalDy > 105f && abs(totalDy) > abs(totalDx) * 1.35f) {
+                            triggered = true
+                            onClose()
+                        }
+                    }
+                }
+            }
     ) {
         Box(modifier = Modifier.fillMaxWidth()) {
             KaruiPivotHeader(
@@ -366,6 +411,7 @@ fun AppDrawerScreen(
                     } else null
 
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
                             start = 16.dp,
@@ -441,6 +487,7 @@ fun AppDrawerScreen(
                     }
                 } else {
                     LazyVerticalGrid(
+                        state = gridState,
                         columns = GridCells.Fixed(settings.drawerColumns),
                         modifier = Modifier.fillMaxSize(),
                         contentPadding = PaddingValues(
@@ -492,50 +539,60 @@ fun AppDrawerScreen(
                     )
                 }
                 Spacer(Modifier.height(10.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(palette.bg)
-                        .border(2.dp, palette.border, RectangleShape)
-                        .padding(12.dp)
-                ) {
-                    if (pinInput.isEmpty()) {
-                        Text("Enter PIN (default 0000)", color = palette.gray, fontSize = 13.sp)
-                    }
-                    BasicTextField(
-                        value = pinInput,
-                        onValueChange = { pinInput = it; pinError = false },
-                        singleLine = true,
-                        visualTransformation = PasswordVisualTransformation(),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-                        textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 16.sp),
-                        cursorBrush = SolidColor(palette.accent),
-                        modifier = Modifier.fillMaxWidth()
+                if (settings.hiddenPin.isEmpty()) {
+                    Text(
+                        text = "No hidden apps or PIN set yet. Hide an app first to set your 4-6 digit PIN.",
+                        color = palette.gray,
+                        fontSize = (12 * scale).sp
                     )
-                }
-                if (pinError) {
-                    Spacer(Modifier.height(6.dp))
-                    Text("Incorrect PIN", color = Color(0xFFEF5350), fontSize = 12.sp)
-                }
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    KaruiSubtleButton("Cancel", { showPinDialog = false }, Modifier.weight(1f))
-                    KaruiButton("Unlock", {
-                        if (pinInput == settings.hiddenPin) {
-                            showPinDialog = false
-                            showHiddenVault = true
-                        } else {
-                            pinError = true
+                    Spacer(Modifier.height(12.dp))
+                    KaruiSubtleButton("Close", { showPinDialog = false }, Modifier.fillMaxWidth())
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(palette.bg)
+                            .border(2.dp, palette.border, RectangleShape)
+                            .padding(12.dp)
+                    ) {
+                        if (pinInput.isEmpty()) {
+                            Text("Enter 4-6 digit PIN", color = palette.gray, fontSize = 13.sp)
                         }
-                    }, Modifier.weight(1f))
+                        BasicTextField(
+                            value = pinInput,
+                            onValueChange = { if (it.length <= 6) { pinInput = it; pinError = false } },
+                            singleLine = true,
+                            visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
+                            textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 16.sp),
+                            cursorBrush = SolidColor(palette.accent),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    if (pinError) {
+                        Spacer(Modifier.height(6.dp))
+                        Text("Incorrect PIN", color = Color(0xFFEF5350), fontSize = 12.sp)
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        KaruiSubtleButton("Cancel", { showPinDialog = false }, Modifier.weight(1f))
+                        KaruiButton("Unlock", {
+                            if (pinInput == settings.hiddenPin) {
+                                showPinDialog = false
+                                showHiddenVault = true
+                            } else {
+                                pinError = true
+                            }
+                        }, Modifier.weight(1f))
+                    }
                 }
             }
         }
     }
 
-    // Hidden Apps Vault Dialog (Amarok-style)
+    // Hidden Apps Vault Dialog (List with real App Names & Icons)
     if (showHiddenVault) {
-        val hiddenList = settings.hiddenPackages.sorted()
+        val frameShape = iconShapeToComposeShape(settings.iconShape)
         Dialog(onDismissRequest = { showHiddenVault = false }) {
             Column(
                 modifier = Modifier
@@ -550,7 +607,7 @@ fun AppDrawerScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "HIDDEN VAULT (${hiddenList.size})",
+                        text = "HIDDEN VAULT (${resolvedHiddenApps.size})",
                         color = palette.accent,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Bold,
@@ -562,43 +619,65 @@ fun AppDrawerScreen(
                 KaruiDashedDivider()
                 Spacer(Modifier.height(10.dp))
 
-                if (hiddenList.isEmpty()) {
+                if (resolvedHiddenApps.isEmpty()) {
                     Text(
-                        text = "No hidden apps. Long-press any app and tap HIDE APP.",
+                        text = "No hidden apps.",
                         color = palette.gray,
                         fontSize = (12 * scale).sp
                     )
                 } else {
                     LazyColumn(
-                        modifier = Modifier.height(260.dp),
+                        modifier = Modifier.height(280.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(hiddenList, key = { it }) { pkg ->
+                        items(resolvedHiddenApps, key = { it.packageName }) { item ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(palette.bg)
                                     .border(1.dp, palette.border, RectangleShape)
+                                    .clickable {
+                                        showHiddenVault = false
+                                        onLaunchHiddenApp(item.packageName)
+                                    }
                                     .padding(10.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = pkg,
-                                    color = palette.text,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = (12 * scale).sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f).padding(end = 8.dp)
-                                )
-                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    KaruiSubtleButton("Open", {
-                                        showHiddenVault = false
-                                        onLaunchHiddenApp(pkg)
-                                    })
-                                    KaruiSubtleButton("Unhide", { onUnhideApp(pkg) })
+                                Row(
+                                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(30.dp)
+                                            .clip(frameShape)
+                                            .background(palette.surface)
+                                            .border(1.dp, palette.border, frameShape)
+                                            .padding(2.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        if (item.icon != null) {
+                                            Image(
+                                                bitmap = item.icon,
+                                                contentDescription = item.label,
+                                                modifier = Modifier.fillMaxSize().clip(frameShape)
+                                            )
+                                        } else {
+                                            Icon(Icons.Rounded.Apps, null, tint = palette.accent, modifier = Modifier.size(18.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        text = item.label,
+                                        color = palette.text,
+                                        fontWeight = FontWeight.Medium,
+                                        fontSize = (14 * scale).sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
+                                KaruiSubtleButton("Unhide", { onUnhideApp(item.packageName) })
                             }
                         }
                     }

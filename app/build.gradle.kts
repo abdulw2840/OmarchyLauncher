@@ -21,11 +21,11 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file("debug.keystore")
-            storePassword = "locguard"
-            keyAlias = "locguard"
-            keyPassword = "locguard"
+        create("omarchy") {
+            storeFile = file("omarchy-debug.keystore")
+            storePassword = "omarchy"
+            keyAlias = "omarchy"
+            keyPassword = "omarchy"
         }
     }
 
@@ -33,7 +33,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.getByName("omarchy")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -41,6 +41,7 @@ android {
         }
         debug {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("omarchy")
         }
     }
 

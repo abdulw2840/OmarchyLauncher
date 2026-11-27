@@ -10,5 +10,6 @@
 .cxx
 *.jks
 *.keystore
+!app/omarchy-debug.keystore
 /dist
 

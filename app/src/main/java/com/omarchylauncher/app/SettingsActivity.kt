@@ -65,6 +65,8 @@ class SettingsActivity : ComponentActivity() {
                     onSetShowHomeLabels = viewModel::setShowHomeLabels,
                     onSetMonochromeIcons = viewModel::setMonochromeIcons,
                     onSetIconShape = viewModel::setIconShape,
+                    onSetShowSteps = viewModel::setShowSteps,
+                    onSetShowScreenTime = viewModel::setShowScreenTime,
                     onSetDrawerColumns = viewModel::setDrawerColumns,
                     onSetDrawerListMode = viewModel::setDrawerListMode,
                     onSetShowDrawerLabels = viewModel::setShowDrawerLabels,

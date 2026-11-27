@@ -73,6 +73,8 @@ fun SettingsScreen(
     onSetShowHomeLabels: (Boolean) -> Unit,
     onSetMonochromeIcons: (Boolean) -> Unit,
     onSetIconShape: (IconShape) -> Unit,
+    onSetShowSteps: (Boolean) -> Unit,
+    onSetShowScreenTime: (Boolean) -> Unit,
     onSetDrawerColumns: (Int) -> Unit,
     onSetDrawerListMode: (Boolean) -> Unit,
     onSetShowDrawerLabels: (Boolean) -> Unit,
@@ -223,7 +225,15 @@ fun SettingsScreen(
                             Spacer(modifier = Modifier.height(12.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
-                            ToggleRow("At a Glance Bar", "Clock, date, battery & privilege badge", settings.showAtAGlance, onSetShowAtAGlance)
+                            ToggleRow("At a Glance Bar", "Clock, date, battery & weather", settings.showAtAGlance, onSetShowAtAGlance)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            ToggleRow("Show Screen Time", "Today's usage time inside status box", settings.showScreenTime, onSetShowScreenTime)
+                            Spacer(modifier = Modifier.height(10.dp))
+                            KaruiDashedDivider()
+                            Spacer(modifier = Modifier.height(10.dp))
+                            ToggleRow("Show Steps Count", "Today's step counter inside status box", settings.showSteps, onSetShowSteps)
                             Spacer(modifier = Modifier.height(10.dp))
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
@@ -289,7 +299,7 @@ fun SettingsScreen(
                             KaruiDashedDivider()
                             Spacer(modifier = Modifier.height(10.dp))
                             var pinDraft by remember(settings.hiddenPin) { mutableStateOf(settings.hiddenPin) }
-                            Text("HIDDEN VAULT PIN (HOLD TOP-LEFT IN APPS)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
+                            Text("HIDDEN VAULT PIN (4-6 DIGITS)", color = palette.gray, fontSize = (11 * scale).sp, fontWeight = FontWeight.Bold)
                             Spacer(modifier = Modifier.height(6.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(
@@ -301,7 +311,7 @@ fun SettingsScreen(
                                 ) {
                                     BasicTextField(
                                         value = pinDraft,
-                                        onValueChange = { if (it.length <= 8) pinDraft = it },
+                                        onValueChange = { if (it.length <= 6 && it.all { c -> c.isDigit() }) pinDraft = it },
                                         singleLine = true,
                                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
                                         textStyle = TextStyle(color = palette.text, fontFamily = FontFamily.Monospace, fontSize = 13.sp),
@@ -309,7 +319,7 @@ fun SettingsScreen(
                                         modifier = Modifier.fillMaxWidth()
                                     )
                                 }
-                                KaruiSubtleButton("Set PIN", { if (pinDraft.isNotBlank()) onSetHiddenPin(pinDraft) })
+                                KaruiSubtleButton("Set PIN", { if (pinDraft.length in 4..6) onSetHiddenPin(pinDraft) })
                             }
                         }
                     }

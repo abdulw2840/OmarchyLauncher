@@ -48,13 +48,16 @@ data class LauncherSettings(
     val hapticFeedback: Boolean = true,
     val monochromeIcons: Boolean = false,
     val iconShape: IconShape = IconShape.SQUARE,
-    val hiddenPin: String = "0000",
+    val hiddenPin: String = "",
     val webSearchProvider: WebSearchProvider = WebSearchProvider.GOOGLE_APP,
     val weatherLocation: String = "",
     val weatherRefreshMinutes: Int = 30,
     val weatherTempText: String = "",
     val weatherDescText: String = "",
     val weatherLastUpdated: Long = 0L,
+    val showSteps: Boolean = false,
+    val showScreenTime: Boolean = false,
+    val extraPagesCount: Int = 0,
     val pinnedHomePackages: List<String> = emptyList(),
     val dockPackages: List<String> = emptyList(),
     val hiddenPackages: Set<String> = emptySet(),
@@ -90,6 +93,9 @@ class LauncherPreferences(private val context: Context) {
         val WEATHER_TEMP = stringPreferencesKey("weather_temp")
         val WEATHER_DESC = stringPreferencesKey("weather_desc")
         val WEATHER_UPDATED = longPreferencesKey("weather_updated")
+        val SHOW_STEPS = booleanPreferencesKey("show_steps")
+        val SHOW_SCREEN_TIME = booleanPreferencesKey("show_screen_time")
+        val EXTRA_PAGES = intPreferencesKey("extra_pages")
         val PINNED_HOME = stringPreferencesKey("pinned_home_csv")
         val DOCK_PKGS = stringPreferencesKey("dock_pkgs_csv")
         val HIDDEN_PKGS = stringSetPreferencesKey("hidden_pkgs")
@@ -125,13 +131,16 @@ class LauncherPreferences(private val context: Context) {
             hapticFeedback = p[Keys.HAPTIC] ?: true,
             monochromeIcons = p[Keys.MONOCHROME_ICONS] ?: false,
             iconShape = shape,
-            hiddenPin = p[Keys.HIDDEN_PIN] ?: "0000",
+            hiddenPin = p[Keys.HIDDEN_PIN] ?: "",
             webSearchProvider = searchProv,
             weatherLocation = p[Keys.WEATHER_LOCATION] ?: "",
             weatherRefreshMinutes = p[Keys.WEATHER_REFRESH_MIN] ?: 30,
             weatherTempText = p[Keys.WEATHER_TEMP] ?: "",
             weatherDescText = p[Keys.WEATHER_DESC] ?: "",
             weatherLastUpdated = p[Keys.WEATHER_UPDATED] ?: 0L,
+            showSteps = p[Keys.SHOW_STEPS] ?: false,
+            showScreenTime = p[Keys.SHOW_SCREEN_TIME] ?: false,
+            extraPagesCount = (p[Keys.EXTRA_PAGES] ?: 0).coerceIn(0, 4),
             pinnedHomePackages = parseCsv(p[Keys.PINNED_HOME]),
             dockPackages = parseCsv(p[Keys.DOCK_PKGS]),
             hiddenPackages = p[Keys.HIDDEN_PKGS] ?: emptySet(),
@@ -168,6 +177,9 @@ class LauncherPreferences(private val context: Context) {
     suspend fun setWebSearchProvider(provider: WebSearchProvider) = context.dataStore.edit { it[Keys.WEB_SEARCH_PROVIDER] = provider.name }
     suspend fun setWeatherLocation(city: String) = context.dataStore.edit { it[Keys.WEATHER_LOCATION] = city.trim() }
     suspend fun setWeatherRefreshMinutes(mins: Int) = context.dataStore.edit { it[Keys.WEATHER_REFRESH_MIN] = mins }
+    suspend fun setShowSteps(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_STEPS] = v }
+    suspend fun setShowScreenTime(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_SCREEN_TIME] = v }
+    suspend fun setExtraPagesCount(count: Int) = context.dataStore.edit { it[Keys.EXTRA_PAGES] = count.coerceIn(0, 4) }
 
     suspend fun saveWeatherCache(temp: String, desc: String, ts: Long) {
         context.dataStore.edit {

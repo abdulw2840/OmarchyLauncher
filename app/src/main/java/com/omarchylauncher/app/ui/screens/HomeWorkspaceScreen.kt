@@ -2,6 +2,7 @@ package com.omarchylauncher.app.ui.screens
 
 import android.appwidget.AppWidgetHost
 import android.appwidget.AppWidgetManager
+import android.text.format.DateFormat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,11 +21,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Apps
@@ -35,9 +39,11 @@ import androidx.compose.material.icons.rounded.WbSunny
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +70,7 @@ import com.omarchylauncher.app.ui.components.KaruiDashedDivider
 import com.omarchylauncher.app.ui.components.KaruiSubtleButton
 import com.omarchylauncher.app.ui.theme.LocalKaruiPalette
 import com.omarchylauncher.app.ui.theme.LocalUiScale
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -78,12 +85,15 @@ fun HomeWorkspaceScreen(
     dockApps: List<AppEntry>,
     appWidgetHost: AppWidgetHost,
     appWidgetManager: AppWidgetManager,
+    homeResetSignal: Int,
     contentPadding: PaddingValues,
     onOpenDrawer: (focusSearch: Boolean) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenWallpaper: () -> Unit,
     onAddWidget: () -> Unit,
     onRemoveWidget: (Int) -> Unit,
+    onAddPage: () -> Unit,
+    onRemovePage: () -> Unit,
     onLockScreen: () -> Unit,
     onExpandNotifications: () -> Unit,
     onRefreshWeather: () -> Unit,
@@ -94,12 +104,26 @@ fun HomeWorkspaceScreen(
     val palette = LocalKaruiPalette.current
     val scale = LocalUiScale.current
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     var showHomeMenu by remember { mutableStateOf(false) }
     var showCityDialog by remember { mutableStateOf(false) }
     val gridState = rememberLazyGridState()
 
-    val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+    val hasWidgetsPage = settings.widgetIds.isNotEmpty() || settings.extraPagesCount > 0
+    val totalPages = 1 + maxOf(settings.extraPagesCount, if (settings.widgetIds.isNotEmpty()) 1 else 0)
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { totalPages })
+
+    LaunchedEffect(homeResetSignal) {
+        if (homeResetSignal > 0 && pagerState.currentPage != 0) {
+            pagerState.animateScrollToPage(0)
+        }
+    }
+
+    val is24h = DateFormat.is24HourFormat(context)
+    val timeFormat = remember(is24h) {
+        SimpleDateFormat(if (is24h) "HH:mm" else "h:mm a", Locale.getDefault())
+    }
     val dateFormat = remember { SimpleDateFormat("EEE, MMM dd", Locale.getDefault()) }
 
     Box(
@@ -133,7 +157,7 @@ fun HomeWorkspaceScreen(
                         totalDx += delta.x
                         totalDy += delta.y
 
-                        if (!triggered && abs(totalDy) > 110f && abs(totalDy) > abs(totalDx) * 1.4f) {
+                        if (!triggered && abs(totalDy) > 100f && abs(totalDy) > abs(totalDx) * 1.35f) {
                             if (totalDy < 0f && !gridState.canScrollForward) {
                                 triggered = true
                                 onOpenDrawer(settings.autoFocusDrawerSearch)
@@ -153,183 +177,263 @@ fun HomeWorkspaceScreen(
             )
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // At a Glance + Weather (No GPS, No [USER] chip)
-            if (settings.showAtAGlance) {
-                KaruiBox(title = "omarchy // status", contentPadding = 12.dp) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = timeFormat.format(Date(clockState.timeMillis)),
-                                color = palette.accent,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = (32 * scale).sp,
-                                fontWeight = FontWeight.Bold,
-                                lineHeight = (34 * scale).sp
-                            )
-                            Text(
-                                text = "${dateFormat.format(Date(clockState.timeMillis)).uppercase()}  •  BAT ${clockState.batteryPercent}%",
-                                color = palette.text,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = (12 * scale).sp
-                            )
-                        }
-                    }
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.weight(1f)
+            ) { page ->
+                if (page == 0) {
+                    // Default Home Screen
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        if (settings.showAtAGlance) {
+                            KaruiBox(title = "omarchy // status", contentPadding = 12.dp) {
+                                Text(
+                                    text = timeFormat.format(Date(clockState.timeMillis)),
+                                    color = palette.accent,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = (30 * scale).sp,
+                                    fontWeight = FontWeight.Bold,
+                                    lineHeight = (32 * scale).sp
+                                )
+                                Text(
+                                    text = "${dateFormat.format(Date(clockState.timeMillis)).uppercase()}  •  BAT ${clockState.batteryPercent}%",
+                                    color = palette.text,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = (12 * scale).sp
+                                )
 
-                    Spacer(modifier = Modifier.height(8.dp))
-                    KaruiDashedDivider()
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clickable { showCityDialog = true },
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.WbSunny,
-                                contentDescription = "Weather",
-                                tint = palette.accent,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            val weatherLabel = when {
-                                isWeatherRefreshing -> "Updating weather..."
-                                settings.weatherLocation.isBlank() -> "Tap to set weather city"
-                                settings.weatherTempText.isNotBlank() ->
-                                    "${settings.weatherTempText}  •  ${settings.weatherDescText}"
-                                else -> "${settings.weatherLocation} (tap refresh)"
-                            }
-                            Text(
-                                text = weatherLabel,
-                                color = if (settings.weatherLocation.isBlank()) palette.gray else palette.text,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = (12 * scale).sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-
-                        Box(
-                            modifier = Modifier
-                                .size(26.dp)
-                                .background(palette.surface)
-                                .border(1.dp, palette.border, RectangleShape)
-                                .clickable {
-                                    if (settings.weatherLocation.isBlank()) showCityDialog = true
-                                    else onRefreshWeather()
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Rounded.Refresh,
-                                contentDescription = "Refresh Weather",
-                                tint = palette.accent,
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                    }
-                }
-                Spacer(modifier = Modifier.height(12.dp))
-            }
-
-            // Pinned Home Grid + Widgets
-            Box(modifier = Modifier.weight(1f)) {
-                if (pinnedApps.isEmpty() && settings.widgetIds.isEmpty()) {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "[ EMPTY WORKSPACE ]",
-                            color = palette.gray,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = (13 * scale).sp
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = "Swipe up for drawer • Long-press for menu",
-                            color = palette.gray,
-                            fontSize = (12 * scale).sp
-                        )
-                    }
-                } else {
-                    LazyVerticalGrid(
-                        state = gridState,
-                        columns = GridCells.Fixed(settings.gridColumns),
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        // Widgets section
-                        items(
-                            items = settings.widgetIds,
-                            key = { "widget_$it" },
-                            span = { GridItemSpan(settings.gridColumns) }
-                        ) { widgetId ->
-                            val info = remember(widgetId) {
-                                runCatching { appWidgetManager.getAppWidgetInfo(widgetId) }.getOrNull()
-                            }
-                            if (info != null) {
-                                val minH = (info.minHeight.coerceIn(72, 260)).dp
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .background(palette.surface)
-                                        .border(2.dp, palette.border, RectangleShape)
-                                        .padding(4.dp)
-                                ) {
-                                    AndroidView(
-                                        factory = {
-                                            appWidgetHost.createView(context, widgetId, info).apply {
-                                                setAppWidget(widgetId, info)
-                                            }
-                                        },
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(minH)
+                                // Optional Screen Time & Steps
+                                if (settings.showScreenTime || settings.showSteps) {
+                                    val parts = buildList {
+                                        if (settings.showScreenTime) {
+                                            val st = clockState.screenTimeText.ifEmpty { "--" }
+                                            add("SCREEN $st")
+                                        }
+                                        if (settings.showSteps) {
+                                            val steps = if (clockState.stepsCount >= 0) "${clockState.stepsCount}" else "--"
+                                            add("STEPS $steps")
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = parts.joinToString("  •  "),
+                                        color = palette.gray,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = (11 * scale).sp
                                     )
+                                }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                KaruiDashedDivider()
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable { showCityDialog = true },
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Rounded.WbSunny,
+                                            contentDescription = "Weather",
+                                            tint = palette.accent,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        val weatherLabel = when {
+                                            isWeatherRefreshing -> "Updating weather..."
+                                            settings.weatherLocation.isBlank() -> "Tap to set weather city"
+                                            settings.weatherTempText.isNotBlank() ->
+                                                "${settings.weatherTempText}  •  ${settings.weatherDescText}"
+                                            else -> "${settings.weatherLocation} (tap refresh)"
+                                        }
+                                        Text(
+                                            text = weatherLabel,
+                                            color = if (settings.weatherLocation.isBlank()) palette.gray else palette.text,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = (12 * scale).sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+
                                     Box(
                                         modifier = Modifier
-                                            .align(Alignment.TopEnd)
-                                            .size(22.dp)
-                                            .background(palette.bg)
+                                            .size(26.dp)
+                                            .background(palette.surface)
                                             .border(1.dp, palette.border, RectangleShape)
-                                            .clickable { onRemoveWidget(widgetId) },
+                                            .clickable {
+                                                if (settings.weatherLocation.isBlank()) showCityDialog = true
+                                                else onRefreshWeather()
+                                            },
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Rounded.Close,
-                                            contentDescription = "Remove Widget",
+                                            imageVector = Icons.Rounded.Refresh,
+                                            contentDescription = "Refresh Weather",
                                             tint = palette.accent,
-                                            modifier = Modifier.size(13.dp)
+                                            modifier = Modifier.size(14.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(12.dp))
+                        }
+
+                        Box(modifier = Modifier.weight(1f)) {
+                            if (pinnedApps.isEmpty()) {
+                                Column(
+                                    modifier = Modifier.align(Alignment.Center),
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Text(
+                                        text = "[ EMPTY WORKSPACE ]",
+                                        color = palette.gray,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = (13 * scale).sp
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Swipe up for drawer • Long-press for menu",
+                                        color = palette.gray,
+                                        fontSize = (12 * scale).sp
+                                    )
+                                }
+                            } else {
+                                LazyVerticalGrid(
+                                    state = gridState,
+                                    columns = GridCells.Fixed(settings.gridColumns),
+                                    modifier = Modifier.fillMaxSize(),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    items(pinnedApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
+                                        KaruiAppTile(
+                                            app = app,
+                                            showLabel = settings.showHomeLabels,
+                                            monochrome = settings.monochromeIcons,
+                                            hapticsEnabled = settings.hapticFeedback,
+                                            iconShape = settings.iconShape,
+                                            onClick = { onLaunchApp(app) },
+                                            onLongClick = { onLongPressApp(app) }
                                         )
                                     }
                                 }
                             }
                         }
-
-                        // Pinned Apps
-                        items(pinnedApps, key = { "${it.packageName}/${it.activityName}" }) { app ->
-                            KaruiAppTile(
-                                app = app,
-                                showLabel = settings.showHomeLabels,
-                                monochrome = settings.monochromeIcons,
-                                hapticsEnabled = settings.hapticFeedback,
-                                iconShape = settings.iconShape,
-                                onClick = { onLaunchApp(app) },
-                                onLongClick = { onLongPressApp(app) }
+                    }
+                } else {
+                    // Extra Widget Page(s) — Dedicated compatibility layer for Android widgets
+                    Column(modifier = Modifier.fillMaxSize()) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "PAGE ${page + 1} // WIDGETS",
+                                color = palette.accent,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = (12 * scale).sp
                             )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                KaruiSubtleButton("+ Widget", onAddWidget)
+                                if (settings.extraPagesCount > 0) {
+                                    KaruiSubtleButton("- Page", {
+                                        scope.launch { pagerState.animateScrollToPage(0) }
+                                        onRemovePage()
+                                    })
+                                }
+                            }
                         }
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val pageWidgets = if (page == 1) settings.widgetIds else emptyList()
+                        if (pageWidgets.isEmpty()) {
+                            Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                KaruiSubtleButton("Tap to Add Widget", onAddWidget)
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.weight(1f).fillMaxWidth(),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(pageWidgets, key = { "widget_$it" }) { widgetId ->
+                                    val info = remember(widgetId) {
+                                        runCatching { appWidgetManager.getAppWidgetInfo(widgetId) }.getOrNull()
+                                    }
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .background(palette.surface)
+                                            .border(2.dp, palette.border, RectangleShape)
+                                            .padding(6.dp)
+                                    ) {
+                                        if (info != null) {
+                                            val minH = (info.minHeight.coerceIn(96, 300)).dp
+                                            AndroidView(
+                                                factory = {
+                                                    appWidgetHost.createView(context, widgetId, info).apply {
+                                                        setAppWidget(widgetId, info)
+                                                    }
+                                                },
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .height(minH)
+                                            )
+                                        } else {
+                                            Text(
+                                                text = "Widget unavailable (tap × to remove)",
+                                                color = palette.gray,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 12.sp,
+                                                modifier = Modifier.padding(16.dp)
+                                            )
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .size(22.dp)
+                                                .background(palette.bg)
+                                                .border(1.dp, palette.border, RectangleShape)
+                                                .clickable { onRemoveWidget(widgetId) },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Close,
+                                                contentDescription = "Remove Widget",
+                                                tint = palette.accent,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Page indicator when multiple pages exist
+            if (hasWidgetsPage && totalPages > 1) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    repeat(totalPages) { i ->
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 3.dp)
+                                .size(width = if (i == pagerState.currentPage) 16.dp else 6.dp, height = 4.dp)
+                                .background(if (i == pagerState.currentPage) palette.accent else palette.gray)
+                        )
                     }
                 }
             }
@@ -433,35 +537,17 @@ fun HomeWorkspaceScreen(
                 KaruiDashedDivider()
                 Spacer(modifier = Modifier.height(10.dp))
 
-                KaruiSubtleButton(
-                    text = "Omarchy Settings & Themes",
-                    onClick = { showHomeMenu = false; onOpenSettings() },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                KaruiSubtleButton("Omarchy Settings & Themes", { showHomeMenu = false; onOpenSettings() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton(
-                    text = "Add Widget",
-                    onClick = { showHomeMenu = false; onAddWidget() },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                KaruiSubtleButton("Add Widget", { showHomeMenu = false; onAddWidget() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton(
-                    text = "Open App Drawer",
-                    onClick = { showHomeMenu = false; onOpenDrawer(false) },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                KaruiSubtleButton("Add Home Page", { showHomeMenu = false; onAddPage() }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton(
-                    text = "System Wallpaper",
-                    onClick = { showHomeMenu = false; onOpenWallpaper() },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                KaruiSubtleButton("Open App Drawer", { showHomeMenu = false; onOpenDrawer(false) }, Modifier.fillMaxWidth())
                 Spacer(modifier = Modifier.height(8.dp))
-                KaruiSubtleButton(
-                    text = "Lock Screen",
-                    onClick = { showHomeMenu = false; onLockScreen() },
-                    modifier = Modifier.fillMaxWidth()
-                )
+                KaruiSubtleButton("System Wallpaper", { showHomeMenu = false; onOpenWallpaper() }, Modifier.fillMaxWidth())
+                Spacer(modifier = Modifier.height(8.dp))
+                KaruiSubtleButton("Lock Screen", { showHomeMenu = false; onLockScreen() }, Modifier.fillMaxWidth())
             }
         }
     }

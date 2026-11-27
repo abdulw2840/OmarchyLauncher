@@ -2,21 +2,32 @@ package com.omarchylauncher.app.ui
 
 import android.app.Application
 import android.app.SearchManager
+import android.app.usage.UsageStatsManager
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ShortcutInfo
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.net.Uri
 import android.os.BatteryManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.omarchylauncher.app.OmarchyLauncherApp
 import com.omarchylauncher.app.SettingsActivity
 import com.omarchylauncher.app.data.AppEntry
+import com.omarchylauncher.app.data.HiddenAppInfo
 import com.omarchylauncher.app.data.IconShape
 import com.omarchylauncher.app.data.LauncherSettings
 import com.omarchylauncher.app.data.WeatherService
 import com.omarchylauncher.app.data.WebSearchProvider
 import com.omarchylauncher.app.privilege.PrivilegeStatus
+import com.topjohnwu.superuser.Shell
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -27,10 +38,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.Calendar
 
 data class ClockState(
     val timeMillis: Long = System.currentTimeMillis(),
-    val batteryPercent: Int = 100
+    val batteryPercent: Int = 100,
+    val screenTimeText: String = "",
+    val stepsCount: Int = -1
 )
 
 class LauncherViewModel(application: Application) : AndroidViewModel(application) {
@@ -65,10 +80,55 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         s.dockPackages.distinct().mapNotNull { map[it] }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private var latestSensorSteps: Int = -1
+    private val stepPrefs by lazy { app.getSharedPreferences("omarchy_steps", Context.MODE_PRIVATE) }
+
     init {
         refreshPrivileges()
         seedDefaultAppsOnce()
+        registerStepSensor()
         startClockAndWeatherTicker()
+    }
+
+    private fun registerStepSensor() {
+        runCatching {
+            val sm = app.getSystemService(SensorManager::class.java)
+            val sensor = sm?.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
+            sm.registerListener(object : SensorEventListener {
+                override fun onSensorChanged(event: SensorEvent?) {
+                    val total = event?.values?.firstOrNull()?.toInt() ?: return
+                    val today = Calendar.getInstance().let { "${it.get(Calendar.YEAR)}-${it.get(Calendar.DAY_OF_YEAR)}" }
+                    val savedDay = stepPrefs.getString("day", "")
+                    var baseline = stepPrefs.getInt("baseline", -1)
+                    if (savedDay != today || baseline < 0 || total < baseline) {
+                        baseline = total
+                        stepPrefs.edit().putString("day", today).putInt("baseline", baseline).apply()
+                    }
+                    latestSensorSteps = (total - baseline).coerceAtLeast(0)
+                }
+                override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+            }, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        }
+    }
+
+    private fun readTodayScreenTime(): String {
+        return runCatching {
+            val usm = app.getSystemService(UsageStatsManager::class.java) ?: return ""
+            val cal = Calendar.getInstance().apply {
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val now = System.currentTimeMillis()
+            val stats = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, cal.timeInMillis, now)
+            if (stats.isNullOrEmpty()) return ""
+            val totalMs = stats.sumOf { it.totalTimeInForeground }
+            val mins = (totalMs / 60_000L).toInt()
+            val h = mins / 60
+            val m = mins % 60
+            if (h > 0) "${h}h ${m}m" else "${m}m"
+        }.getOrDefault("")
     }
 
     private fun startClockAndWeatherTicker() {
@@ -78,12 +138,15 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
                 val pct = runCatching {
                     bm.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY)
                 }.getOrDefault(100).coerceIn(0, 100)
+                val s = settings.value
+                val screenTime = if (s.showScreenTime) readTodayScreenTime() else ""
                 _clockState.value = ClockState(
                     timeMillis = System.currentTimeMillis(),
-                    batteryPercent = pct
+                    batteryPercent = pct,
+                    screenTimeText = screenTime,
+                    stepsCount = if (s.showSteps) latestSensorSteps else -1
                 )
 
-                val s = settings.value
                 if (s.weatherLocation.isNotBlank() && s.weatherRefreshMinutes > 0) {
                     val elapsedMs = System.currentTimeMillis() - s.weatherLastUpdated
                     if (elapsedMs >= s.weatherRefreshMinutes * 60_000L) {
@@ -241,28 +304,75 @@ class LauncherViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setHiddenPinAndHide(pin: String, pkg: String) {
+        viewModelScope.launch {
+            app.preferences.setHiddenPin(pin)
+            hidePackageInternal(pkg, true)
+        }
+    }
+
     fun toggleHiddenPackage(pkg: String) {
         viewModelScope.launch {
             val currentlyHidden = settings.value.hiddenPackages.contains(pkg)
-            val newHidden = !currentlyHidden
-            app.preferences.setPackageHidden(pkg, newHidden)
-            if (privilegeStatus.value.isRootAvailable) {
-                val ok = app.privilegeController.hideAppWithRoot(pkg, newHidden)
-                if (ok) app.appRepository.refresh()
-                Toast.makeText(
-                    app,
-                    if (newHidden) "Hidden (Root) & moved to Vault" else "Unhidden & restored",
-                    Toast.LENGTH_SHORT
-                ).show()
-            } else {
-                Toast.makeText(
-                    app,
-                    if (newHidden) "Hidden in Vault" else "Restored from Vault",
-                    Toast.LENGTH_SHORT
-                ).show()
+            hidePackageInternal(pkg, !currentlyHidden)
+        }
+    }
+
+    private suspend fun hidePackageInternal(pkg: String, hide: Boolean) {
+        app.preferences.setPackageHidden(pkg, hide)
+        if (privilegeStatus.value.isRootAvailable) {
+            val ok = app.privilegeController.hideAppWithRoot(pkg, hide)
+            if (ok) app.appRepository.refresh()
+            Toast.makeText(
+                app,
+                if (hide) "Hidden (Root) & moved to Vault" else "Unhidden & restored",
+                Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            Toast.makeText(
+                app,
+                if (hide) "Hidden in Vault" else "Restored from Vault",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
+    suspend fun getHiddenAppDetails(packages: Set<String>): List<HiddenAppInfo> =
+        withContext(Dispatchers.IO) { app.appRepository.resolveHiddenApps(packages) }
+
+    fun setShowSteps(v: Boolean) {
+        viewModelScope.launch {
+            app.preferences.setShowSteps(v)
+            if (v && privilegeStatus.value.isRootAvailable) {
+                withContext(Dispatchers.IO) {
+                    runCatching { Shell.cmd("pm grant ${app.packageName} android.permission.ACTIVITY_RECOGNITION").exec() }
+                }
             }
         }
     }
+
+    fun setShowScreenTime(v: Boolean) {
+        viewModelScope.launch {
+            app.preferences.setShowScreenTime(v)
+            if (v) {
+                val granted = withContext(Dispatchers.IO) {
+                    if (privilegeStatus.value.isRootAvailable) {
+                        runCatching {
+                            Shell.cmd("appops set ${app.packageName} GET_USAGE_STATS allow").exec().isSuccess
+                        }.getOrDefault(false)
+                    } else false
+                }
+                if (!granted && readTodayScreenTime().isEmpty()) {
+                    val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    runCatching { app.startActivity(intent) }
+                }
+            }
+        }
+    }
+
+    fun setExtraPagesCount(count: Int) = viewModelScope.launch { app.preferences.setExtraPagesCount(count) }
 
     fun launchHiddenApp(pkg: String) {
         viewModelScope.launch {
