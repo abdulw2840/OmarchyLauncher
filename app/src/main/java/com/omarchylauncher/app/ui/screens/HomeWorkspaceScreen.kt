@@ -284,8 +284,9 @@ fun HomeWorkspaceScreen(
                                     Box(
                                         modifier = Modifier
                                             .size(26.dp)
+                                            .clip(karuiShape())
                                             .background(palette.surface)
-                                            .border(1.dp, palette.border, RectangleShape)
+                                            .border(1.dp, palette.border, karuiShape())
                                             .clickable {
                                                 if (settings.weatherLocation.isBlank()) showCityDialog = true
                                                 else onRefreshWeather()
@@ -590,8 +591,9 @@ fun HomeWorkspaceScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .clip(karuiShape())
                     .background(palette.surface)
-                    .border(2.dp, palette.border, RectangleShape)
+                    .border(2.dp, palette.border, karuiShape())
                     .padding(14.dp)
             ) {
                 Text(
@@ -605,8 +607,9 @@ fun HomeWorkspaceScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .clip(karuiShape())
                         .background(palette.bg)
-                        .border(2.dp, palette.border, RectangleShape)
+                        .border(2.dp, palette.border, karuiShape())
                         .padding(10.dp)
                 ) {
                     if (cityInput.isEmpty()) {
