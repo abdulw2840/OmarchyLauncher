@@ -7,7 +7,7 @@ import android.appwidget.AppWidgetProviderInfo
 import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -61,6 +61,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -218,8 +219,28 @@ class MainActivity : ComponentActivity() {
                 if (homeResetSignal > 0) setDrawerOpenAnimated(false)
             }
 
-            BackHandler(enabled = drawerProgress.value > 0.05f) {
-                setDrawerOpenAnimated(false)
+            // Only consume Back while the drawer is open. When it is closed, leave
+            // Back-to-home / cross-task navigation entirely to Android's system.
+            PredictiveBackHandler(enabled = drawerProgress.value > 0.05f) { backEvents ->
+                val startProgress = drawerProgress.value
+                try {
+                    backEvents.collect { event ->
+                        drawerProgress.snapTo(
+                            (startProgress * (1f - event.progress)).coerceIn(0f, 1f)
+                        )
+                    }
+                    focusDrawerSearch = false
+                    drawerProgress.snapTo(0f)
+                } catch (cancelled: CancellationException) {
+                    drawerProgress.animateTo(
+                        targetValue = startProgress,
+                        animationSpec = spring(
+                            dampingRatio = 0.88f,
+                            stiffness = Spring.StiffnessMediumLow
+                        )
+                    )
+                    throw cancelled
+                }
             }
 
             OmarchyTheme(
